@@ -1,4 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import {
+  startMusic, setMuted, getMuted,
+  playBuild, playRaid, playInjury, playKill,
+  playSuccess, playAlert, playExpedition,
+  duckMusic, unduckMusic, playTickAlarm,
+} from "./sounds.js";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const GRID_COLS = 7;
@@ -12,9 +18,9 @@ const HEAL_RATE_NURSE   = 4;    // ticks removed per tick with a nurse (1 nurse 
 
 // ─── Raid Sizes ───────────────────────────────────────────────────────────────
 const RAID_SIZES = {
-  small:  { label: "SMALL",  targets: 1, icon: "⚡" },
-  medium: { label: "MEDIUM", targets: 2, icon: "🔥" },
-  large:  { label: "LARGE",  targets: 3, icon: "💀" },
+  small:  { label: "SMALL",  targets: 1, icon: "⚡", duration: 20, strikeEvery: 10 },
+  medium: { label: "MEDIUM", targets: 2, icon: "🔥", duration: 30, strikeEvery: 10 },
+  large:  { label: "LARGE",  targets: 3, icon: "💀", duration: 60, strikeEvery: 10 },
 };
 const RAID_SIZE_ORDER = ["small", "medium", "large"];
 // Chance per tick that a pending raid actually launches (60%)
@@ -111,6 +117,24 @@ const ROOM_TYPES = {
     desc: "Generates research points to unlock T2 technologies. Assign researchers to accelerate progress.",
     special: "researchLab",
   },
+  sentryPost: {
+    label: "Sentry Post",    icon: "🪖", color: "#e8d44d", bg: "#1a1500", border: "#e8d44d",
+    cost: { scrap: 30 },    produces: {}, consumes: {}, cap: 2,
+    desc: "Each assigned sentry reduces Arc threat by 5/tick. Sentries can be targeted in raids.",
+    special: "sentryPost", requiresTech: "sentryPost",
+  },
+  radioTower: {
+    label: "Radio Tower",    icon: "📡", color: "#4ab3f4", bg: "#001020", border: "#4ab3f4",
+    cost: { scrap: 40 },    produces: {}, consumes: { energy: 1 }, cap: 0,
+    desc: "Reveals incoming raid size when a raid window opens. (Coming soon)",
+    special: "radioTower", requiresTech: "radioTower",
+  },
+  shelter: {
+    label: "Shelter",        icon: "🏠", color: "#7ecfb4", bg: "#001a12", border: "#7ecfb4",
+    cost: { scrap: 50 },    produces: {}, consumes: {}, cap: 0,
+    desc: "Sound the alarm to protect colonists — sheltered colonists are immune to raids. (Coming soon)",
+    special: "shelter", requiresTech: "shelter",
+  },
 };
 
 // ─── Expedition Definitions ───────────────────────────────────────────────────
@@ -137,7 +161,7 @@ function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
 
 function makeGrid() {
   return Array.from({ length: GRID_ROWS }, (_, r) =>
-    Array.from({ length: GRID_COLS }, (_, c) => ({ id: `${r}-${c}`, type: null, workers: 0 }))
+    Array.from({ length: GRID_COLS }, (_, c) => ({ id: `${r}-${c}`, type: null, workers: 0, damaged: false }))
   );
 }
 
@@ -152,9 +176,9 @@ function initColonists() {
 
 function initGrid() {
   const g = makeGrid();
-  g[3][0] = { id: "3-0", type: "workshop", workers: 1 };
-  g[3][1] = { id: "3-1", type: "power",    workers: 1 };
-  g[3][2] = { id: "3-2", type: "barracks", workers: 0 };
+  g[3][0] = { id: "3-0", type: "workshop", workers: 1, damaged: false };
+  g[3][1] = { id: "3-1", type: "power",    workers: 1, damaged: false };
+  g[3][2] = { id: "3-2", type: "barracks", workers: 0, damaged: false };
   return g;
 }
 
@@ -165,12 +189,14 @@ const STATUS_COLOR = {
   working:       "#4ab3f4",
   onExpedition:  "#f5a623",
   injured:       "#ff4444",
+  onSentry:      "#e8d44d",
 };
 const STATUS_LABEL = {
   idle:          "IDLE",
   working:       "ON DUTY",
   onExpedition:  "DEPLOYED",
   injured:       "INJURED",
+  onSentry:      "ON SENTRY",
 };
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -199,7 +225,10 @@ export default function Speranza() {
   const [unlockedTechs, setUnlockedTechs] = useState([]);
   // 0 = paused, otherwise multiplier applied to TICK_MS
   const TIMESCALES = [0, 0.5, 1, 2, 4, 10];
-  const [timescale, setTimescale] = useState(1);
+  const [timescale,   setTimescale]   = useState(1);
+  const [isMuted,     setIsMuted]     = useState(false);
+  // activeRaid: null | { sizeKey, ticksLeft, strikeCountdown }
+  const [activeRaid,  setActiveRaid]  = useState(null);
 
   // ── Derived ───────────────────────────────────────────────────────────────
   // These are computed from colonists array — no separate state needed
@@ -229,8 +258,21 @@ export default function Speranza() {
   useEffect(() => { gameOverRef.current      = gameOver;      }, [gameOver]);
   useEffect(() => { raidWindowRef.current    = raidWindow;    }, [raidWindow]);
   useEffect(() => { unlockedTechsRef.current = unlockedTechs; }, [unlockedTechs]);
+  const activeRaidRef     = useRef(activeRaid);
   useEffect(() => { timescaleRef.current     = timescale;     }, [timescale]);
   useEffect(() => { tickRef.current          = tick;          }, [tick]);
+  useEffect(() => { activeRaidRef.current    = activeRaid;    }, [activeRaid]);
+
+  // ── Audio: start music on first interaction ───────────────────────────────
+  const handleFirstInteraction = useCallback(() => {
+    startMusic();
+  }, []);
+
+  const toggleMute = useCallback(() => {
+    const next = !getMuted();
+    setMuted(next);
+    setIsMuted(next);
+  }, []);
 
   const addLog = useCallback((msg) => {
     setLog(prev => [`[T${tickRef.current}] ${msg}`, ...prev.slice(0, 29)]);
@@ -262,6 +304,7 @@ export default function Speranza() {
           if (!cell.type || !cell.workers) return;
           const def = ROOM_TYPES[cell.type];
           if (def.special === "barracks" || def.special === "armory") return;
+          if (cell.damaged) return; // damaged rooms don't produce
 
           let canRun = true;
           for (const [r, amt] of Object.entries(def.consumes)) {
@@ -305,6 +348,7 @@ export default function Speranza() {
       const builtRooms     = g.flatMap(row => row).filter(cell => cell.type).length;
       const threatThisTick = THREAT_PER_TICK + builtRooms * 0.8;
       const rw             = raidWindowRef.current;
+      const ar             = activeRaidRef.current;
 
       if (rw) {
         // ── Raid window is open — roll each tick to launch or escalate ──────
@@ -327,58 +371,15 @@ export default function Speranza() {
             setRaidWindow(null);
             setThreat(25);
           } else {
-
-          const working  = cols.filter(c => c.status === "working");
-          const targets  = working.slice(0, sizeDef.targets); // pick first N working colonists
-
-          if (targets.length === 0) {
-            addLog(`🚨 ${sizeDef.icon} ${sizeDef.label} ARC RAID! No workers exposed — colony held.`);
-            addToast(`${sizeDef.icon} ${sizeDef.label} ARC RAID\nNo workers exposed — colony held.`, "raid");
-          } else {
-            addLog(`🚨 ${sizeDef.icon} ${sizeDef.label} ARC RAID — ${targets.length} colonist(s) targeted!`);
-
-            targets.forEach(target => {
-              // Decrement a staffed room for each target
-              setGrid(prev => {
-                const ng = prev.map(row => row.map(c => ({ ...c })));
-                const staffed = [];
-                ng.forEach((row, r) => row.forEach((cell, c) => {
-                  if (cell.type && cell.workers > 0) staffed.push({ r, c });
-                }));
-                if (staffed.length > 0) {
-                  const room = staffed[Math.floor(Math.random() * staffed.length)];
-                  ng[room.r][room.c].workers = Math.max(0, ng[room.r][room.c].workers - 1);
-                }
-                return ng;
-              });
-
-              // Three-way outcome roll per target
-              const roll = Math.random();
-              if (roll < 0.50) {
-                setColonists(prev =>
-                  prev.map(c => c.id === target.id ? { ...c, status: "idle" } : c)
-                );
-                addLog(`  → ${target.name} fled their post!`);
-                addToast(`🚨 ${sizeDef.label} RAID\n${target.name} fled — shaken but alive.`, "raid");
-              } else if (roll < 0.80) {
-                setColonists(prev =>
-                  prev.map(c => c.id === target.id ? { ...c, status: "injured", injuryTicksLeft: INJURY_TICKS_BASE } : c)
-                );
-                addLog(`  → ${target.name} was INJURED!`);
-                addToast(`🚨 ${sizeDef.label} RAID — CASUALTY\n${target.name} is injured.`, "injury");
-              } else {
-                setColonists(prev => prev.filter(c => c.id !== target.id));
-                addLog(`  → ${target.name} was KILLED.`);
-                addToast(`🚨 ${sizeDef.label} RAID — KIA\n${target.name} did not make it.`, "raid");
-              }
-            });
-          }
-
-          setRaidFlash(true);
-          setTimeout(() => setRaidFlash(false), 800);
-          setRaidWindow(null);
-          setThreat(25);
-
+            // ── Begin active raid phase ──────────────────────────────────────
+            setActiveRaid({ sizeKey, ticksLeft: sizeDef.duration, strikeCountdown: sizeDef.strikeEvery });
+            setRaidWindow(null);
+            duckMusic();
+            playRaid();
+            setRaidFlash(true);
+            setTimeout(() => setRaidFlash(false), 800);
+            addLog(`⚔ ${sizeDef.icon} ${sizeDef.label} RAID UNDERWAY — ${sizeDef.duration} ticks! First strike in ${sizeDef.strikeEvery}.`);
+            addToast(`⚔ ${sizeDef.label} RAID IN PROGRESS\nArc forces breaching the perimeter.\nFirst strike in ${sizeDef.strikeEvery} ticks.`, "raid");
           } // end barricade else
 
         } else {
@@ -393,10 +394,14 @@ export default function Speranza() {
           setRaidWindow({ sizeIdx: nextSizeIdx, escalations: rw.escalations + 1 });
         }
 
-      } else {
-        // ── No active raid window — build threat normally ───────────────────
+      } else if (!ar) {
+        // ── No active raid window or active raid — build threat normally ─────
+        let sentryCount = 0;
+        g.forEach(row => row.forEach(cell => {
+          if (cell.type === "sentryPost") sentryCount += cell.workers;
+        }));
         setThreat(prev => {
-          const next = clamp(prev + threatThisTick, 0, THREAT_RAID_THRESHOLD);
+          const next = clamp(prev + threatThisTick - sentryCount * 5, 0, THREAT_RAID_THRESHOLD);
           if (next >= THREAT_RAID_THRESHOLD) {
             // Open a raid window starting at small
             setRaidWindow({ sizeIdx: 0, escalations: 0 });
@@ -406,6 +411,95 @@ export default function Speranza() {
           }
           return next;
         });
+      }
+
+      // 2b. Active raid countdown + periodic strikes ────────────────────────
+      const arNow = activeRaidRef.current;
+      if (arNow) {
+        const sizeDef          = RAID_SIZES[arNow.sizeKey];
+        const newStrikeCD      = arNow.strikeCountdown - 1;
+        const newTicksLeft     = arNow.ticksLeft - 1;
+
+        // Pre-strike tick sound (5 ticks before strike)
+        if (newStrikeCD === 5) playTickAlarm();
+
+        // Strike fires this tick
+        if (newStrikeCD <= 0 && newTicksLeft > 0) {
+          const atRisk = cols.filter(c => c.status === "working" || c.status === "onSentry");
+          const targets = atRisk.slice(0, sizeDef.targets);
+          if (targets.length === 0) {
+            addLog(`💢 ${sizeDef.icon} ARC STRIKE — no exposed workers. Colony holds!`);
+            addToast(`💢 ${sizeDef.label} STRIKE\nNo workers exposed — held the line.`, "raid");
+          } else {
+            addLog(`💢 ${sizeDef.icon} ARC STRIKE — ${targets.length} colonist(s) hit!`);
+            targets.forEach(target => {
+              setGrid(prev => {
+                const ng = prev.map(row => row.map(c => ({ ...c })));
+                const staffed = [];
+                ng.forEach((row, r) => row.forEach((cell, c) => {
+                  if (cell.type && cell.workers > 0) staffed.push({ r, c });
+                }));
+                if (staffed.length > 0) {
+                  const room = staffed[Math.floor(Math.random() * staffed.length)];
+                  ng[room.r][room.c].workers = Math.max(0, ng[room.r][room.c].workers - 1);
+                }
+                return ng;
+              });
+              const roll = Math.random();
+              if (roll < 0.50) {
+                setColonists(prev => prev.map(c => c.id === target.id ? { ...c, status: "idle" } : c));
+                addLog(`  → ${target.name} fled their post!`);
+                addToast(`💢 ${sizeDef.label} STRIKE\n${target.name} fled — shaken but alive.`, "raid");
+              } else if (roll < 0.80) {
+                setColonists(prev => prev.map(c => c.id === target.id ? { ...c, status: "injured", injuryTicksLeft: INJURY_TICKS_BASE } : c));
+                addLog(`  → ${target.name} was INJURED!`);
+                addToast(`💢 ${sizeDef.label} STRIKE — CASUALTY\n${target.name} is injured.`, "injury");
+                playInjury();
+              } else {
+                setColonists(prev => prev.filter(c => c.id !== target.id));
+                addLog(`  → ${target.name} was KILLED.`);
+                addToast(`💢 ${sizeDef.label} STRIKE — KIA\n${target.name} did not make it.`, "raid");
+                playKill();
+              }
+            });
+          }
+          // Building damage chance per strike
+          const dmgChance = { small: 0, medium: 0.10, large: 0.25 }[arNow.sizeKey] ?? 0;
+          if (dmgChance > 0 && Math.random() < dmgChance) {
+            const undamaged = [];
+            g.forEach((row, ri) => row.forEach((cell, ci) => {
+              if (cell.type && !cell.damaged) undamaged.push({ r: ri, c: ci, type: cell.type });
+            }));
+            if (undamaged.length > 0) {
+              const dmgTarget = undamaged[Math.floor(Math.random() * undamaged.length)];
+              setGrid(prev => {
+                const ng = prev.map(row => row.map(c => ({ ...c })));
+                ng[dmgTarget.r][dmgTarget.c].damaged = true;
+                return ng;
+              });
+              addLog(`💥 ${ROOM_TYPES[dmgTarget.type].label} took structural damage!`);
+              addToast(`💥 STRUCTURAL DAMAGE\n${ROOM_TYPES[dmgTarget.type].label} damaged.\nRepair costs 20 scrap.`, "injury");
+            }
+          }
+          setRaidFlash(true);
+          setTimeout(() => setRaidFlash(false), 500);
+        }
+
+        // End raid or continue
+        if (newTicksLeft <= 0) {
+          setActiveRaid(null);
+          setThreat(25);
+          unduckMusic();
+          addLog(`✅ ${sizeDef.label} raid repelled — Arc forces withdrew.`);
+          addToast(`✅ RAID OVER\n${sizeDef.label} Arc forces withdrew.\nThreat level reset.`, "success");
+          playSuccess();
+        } else {
+          setActiveRaid({
+            ...arNow,
+            ticksLeft: newTicksLeft,
+            strikeCountdown: newStrikeCD <= 0 ? sizeDef.strikeEvery : newStrikeCD,
+          });
+        }
       }
 
       // 3. Expedition countdown ──────────────────────────────────────────────
@@ -458,7 +552,8 @@ export default function Speranza() {
           if (newTicks <= 0) {
             addLog(`💊 ${col.name} has recovered and returned to duty.`);
             addToast(`💊 RECOVERED\n${col.name} is back on their feet.`, "success");
-            return { ...col, status: "idle", injuryTicksLeft: 0 };
+            playSuccess();
+      return { ...col, status: "idle", injuryTicksLeft: 0 };
           }
           return { ...col, injuryTicksLeft: newTicks };
         });
@@ -470,15 +565,21 @@ export default function Speranza() {
     return () => clearInterval(interval);
   }, [timescale]); // restart interval when timescale changes
 
-  // ── Warnings ──────────────────────────────────────────────────────────────
-  const lastWarnTick = useRef(-1);
+  // ── Warnings — edge-triggered (only log on false→true transition) ─────────
+  const prevWarn = useRef({ food: false, water: false, energy: false, threat: false });
   useEffect(() => {
-    if (tick === 0 || tick === lastWarnTick.current) return;
-    lastWarnTick.current = tick;
-    if (res.food   < 20) addLog("⚠ FOOD CRITICAL");
-    if (res.water  < 20) addLog("⚠ WATER CRITICAL");
-    if (res.energy < 20) addLog("⚠ ENERGY CRITICAL");
-    if (threat     > 75) addLog("🚨 HIGH THREAT — Arc raid imminent!");
+    if (tick === 0) return;
+    const cur = {
+      food:   res.food   < 20,
+      water:  res.water  < 20,
+      energy: res.energy < 20,
+      threat: threat > 350,   // 70% of THREAT_RAID_THRESHOLD (500)
+    };
+    if (cur.food   && !prevWarn.current.food)   { addLog("⚠ FOOD CRITICAL");             playAlert(); }
+    if (cur.water  && !prevWarn.current.water)  { addLog("⚠ WATER CRITICAL");            playAlert(); }
+    if (cur.energy && !prevWarn.current.energy) { addLog("⚠ ENERGY CRITICAL");           playAlert(); }
+    if (cur.threat && !prevWarn.current.threat) { addLog("🚨 HIGH THREAT — Arc raid imminent!"); }
+    prevWarn.current = cur;
   }, [tick]);
 
   // ── Actions ───────────────────────────────────────────────────────────────
@@ -502,10 +603,11 @@ export default function Speranza() {
     });
     setGrid(prev => {
       const next = prev.map(row => row.map(c => ({ ...c })));
-      next[r][c] = { id: `${r}-${c}`, type, workers: 0 };
+      next[r][c] = { id: `${r}-${c}`, type, workers: 0, damaged: false };
       return next;
     });
-    addLog(`🏗 Built ${def.label} at sector [${r + 1}-${c + 1}]`);
+        addLog(`🏗 Built ${def.label} at sector [${r + 1}-${c + 1}]`);
+        playBuild();
     setBuildMenu(false);
     setSelected(null);
   };
@@ -522,7 +624,8 @@ export default function Speranza() {
       if (idle.length === 0) { addLog("⚠ No free colonists available"); return; }
       if (cell.workers >= def.cap) { addLog("⚠ Room is at capacity"); return; }
       const pick = idle[0];
-      setColonists(prev => prev.map(co => co.id === pick.id ? { ...co, status: "working" } : co));
+      const newStatus = cell.type === "sentryPost" ? "onSentry" : "working";
+      setColonists(prev => prev.map(co => co.id === pick.id ? { ...co, status: newStatus } : co));
       setGrid(prev => {
         const next = prev.map(row => row.map(c => ({ ...c })));
         next[r][c].workers += 1;
@@ -530,11 +633,12 @@ export default function Speranza() {
       });
       addLog(`👤 ${pick.name} assigned to ${def.label}`);
     } else {
-      // Unassign: find any working colonist and free them
+      // Unassign: find a colonist with the right status for this room
       if (cell.workers === 0) return;
-      const working = colonists.filter(co => co.status === "working");
-      if (working.length === 0) return;
-      const pick = working[0];
+      const statusFilter = cell.type === "sentryPost" ? "onSentry" : "working";
+      const available = colonists.filter(co => co.status === statusFilter);
+      if (available.length === 0) return;
+      const pick = available[0];
       setColonists(prev => prev.map(co => co.id === pick.id ? { ...co, status: "idle" } : co));
       setGrid(prev => {
         const next = prev.map(row => row.map(c => ({ ...c })));
@@ -553,7 +657,7 @@ export default function Speranza() {
     setColonists(prev => {
       let toFree = cell.workers;
       return prev.map(co => {
-        if (toFree > 0 && co.status === "working") { toFree--; freed++; return { ...co, status: "idle" }; }
+        if (toFree > 0 && (co.status === "working" || co.status === "onSentry")) { toFree--; freed++; return { ...co, status: "idle" }; }
         return co;
       });
     });
@@ -566,6 +670,19 @@ export default function Speranza() {
     addLog(`💥 Demolished ${ROOM_TYPES[cell.type].label} at [${r + 1}-${c + 1}] (+5 scrap)`);
     setSelected(null);
     setBuildMenu(false);
+  };
+
+  const handleRepair = (r, c) => {
+    const cell = grid[r][c];
+    if (!cell.type || !cell.damaged) return;
+    if (res.scrap < 20) { addLog("⚠ Need 20 scrap to repair"); return; }
+    setRes(prev => ({ ...prev, scrap: prev.scrap - 20 }));
+    setGrid(prev => {
+      const next = prev.map(row => row.map(c => ({ ...c })));
+      next[r][c] = { ...next[r][c], damaged: false };
+      return next;
+    });
+    addLog(`🔧 ${ROOM_TYPES[cell.type].label} at [${r + 1}-${c + 1}] repaired. (-20 scrap)`);
   };
 
   const handleRecruit = () => {
@@ -586,6 +703,7 @@ export default function Speranza() {
     setUnlockedTechs(prev => [...prev, techKey]);
     addLog(`🔬 ${tech.icon} ${tech.label} unlocked!`);
     addToast(`🔬 RESEARCH COMPLETE\n${tech.icon} ${tech.label} unlocked.`, "success");
+    playSuccess();
   };
 
   const handleLaunchExpedition = (type) => {
@@ -605,6 +723,7 @@ export default function Speranza() {
     setThreat(t => clamp(t + def.threatDelta, 0, THREAT_RAID_THRESHOLD));
     setExpedition({ type, ticksLeft: def.duration, colonistIds: picked.map(c => c.id) });
     addLog(`${def.icon} ${names} deployed on ${def.label}. Returns in ${def.duration} ticks.`);
+    playExpedition();
   };
 
   const handleRestart = () => {
@@ -615,6 +734,7 @@ export default function Speranza() {
     setThreat(15);
     setExpedition(null);
     setRaidWindow(null);
+    setActiveRaid(null);
     setUnlockedTechs([]);
     setSelected(null);
     setBuildMenu(false);
@@ -646,7 +766,7 @@ export default function Speranza() {
 
   // ── JSX ───────────────────────────────────────────────────────────────────
   return (
-    <div style={{
+    <div onClick={handleFirstInteraction} style={{
       minHeight: "100vh", background: "#050508", color: "#c8d0d8",
       fontFamily: "'Courier New', monospace",
       display: "flex", flexDirection: "column", alignItems: "center",
@@ -673,6 +793,13 @@ export default function Speranza() {
                   fontWeight: timescale === v ? "bold" : "normal",
                 }}>{label}</button>
               ))}
+              <button onClick={(e) => { e.stopPropagation(); toggleMute(); }} style={{
+                background: "#0a0c14",
+                border: `1px solid ${isMuted ? "#5a2a2a" : "#1a2535"}`,
+                borderRadius: 3, color: isMuted ? "#884444" : "#4ab3f4",
+                padding: "2px 6px", cursor: "pointer", fontSize: 11, fontFamily: "monospace",
+                marginLeft: 4,
+              }}>{isMuted ? "🔇" : "🔊"}</button>
               {timescale === 0 && (
                 <span style={{ color: "#f5a623", fontSize: 8, marginLeft: 3, letterSpacing: 1 }}>PAUSED</span>
               )}
@@ -741,6 +868,68 @@ export default function Speranza() {
         </div>
       </div>
 
+      {/* ── ACTIVE RAID / RAID WINDOW BANNER ── */}
+      {(raidWindow || activeRaid) && (
+        <div style={{
+          width: "100%", maxWidth: 920, marginBottom: 10,
+          background: activeRaid ? "#140000" : "#0e0000",
+          border: `2px solid ${activeRaid ? "#ff4444" : "#ff2200"}`,
+          borderRadius: 6, padding: "10px 16px",
+          boxShadow: "0 0 24px #ff444444",
+          animation: "raidPulse 1.2s ease-in-out infinite",
+        }}>
+          {activeRaid ? (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+              <div>
+                <div style={{ color: "#ff4444", fontSize: 13, fontWeight: "bold", letterSpacing: 2 }}>
+                  {RAID_SIZES[activeRaid.sizeKey].icon} {RAID_SIZES[activeRaid.sizeKey].label} RAID IN PROGRESS
+                </div>
+                <div style={{ color: "#884444", fontSize: 9, marginTop: 3, letterSpacing: 1 }}>
+                  Arc forces are breaching the perimeter — production is at risk
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
+                <div style={{ textAlign: "center" }}>
+                  <div style={{ color: "#ff6666", fontSize: 18, fontWeight: "bold", fontFamily: "monospace" }}>{activeRaid.ticksLeft}</div>
+                  <div style={{ color: "#5a2a2a", fontSize: 8, letterSpacing: 1 }}>TICKS LEFT</div>
+                </div>
+                <div style={{ textAlign: "center" }}>
+                  <div style={{ color: activeRaid.strikeCountdown <= 5 ? "#ff4444" : "#f5a623", fontSize: 18, fontWeight: "bold", fontFamily: "monospace" }}>
+                    {activeRaid.strikeCountdown}
+                  </div>
+                  <div style={{ color: "#5a2a2a", fontSize: 8, letterSpacing: 1 }}>NEXT STRIKE</div>
+                </div>
+                <div style={{ width: 80, height: 8, background: "#200000", borderRadius: 4, overflow: "hidden" }}>
+                  <div style={{
+                    height: "100%", borderRadius: 4,
+                    width: `${(activeRaid.ticksLeft / RAID_SIZES[activeRaid.sizeKey].duration) * 100}%`,
+                    background: "repeating-linear-gradient(90deg, #ff2222 0px, #ff4444 6px, #880000 6px, #880000 12px)",
+                    transition: "width 0.4s",
+                  }} />
+                </div>
+              </div>
+            </div>
+          ) : raidWindow && (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+              <div>
+                <div style={{ color: "#ff6622", fontSize: 13, fontWeight: "bold", letterSpacing: 2 }}>
+                  {RAID_SIZES[RAID_SIZE_ORDER[raidWindow.sizeIdx]].icon} {RAID_SIZES[RAID_SIZE_ORDER[raidWindow.sizeIdx]].label} RAID INCOMING
+                </div>
+                <div style={{ color: "#7a3a1a", fontSize: 9, marginTop: 3, letterSpacing: 1 }}>
+                  Arc forces mobilizing — {Math.round(RAID_LAUNCH_CHANCE * 100)}% strike chance each tick
+                  {raidWindow.escalations > 0 && ` · escalated ${raidWindow.escalations}×`}
+                </div>
+              </div>
+              {unlockedTechs.includes("barricades") && (
+                <div style={{ color: "#4a8a4a", fontSize: 9, letterSpacing: 1 }}>
+                  🛡 {Math.round({ small: 75, medium: 30, large: 10 }[RAID_SIZE_ORDER[raidWindow.sizeIdx]])}% block chance
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ── GAME OVER ── */}
       {gameOver && (
         <div style={{ background: "#1a0000", border: "2px solid #ff3333", borderRadius: 8, padding: 24, marginBottom: 14, textAlign: "center" }}>
@@ -794,6 +983,16 @@ export default function Speranza() {
                                   border: `1px solid ${def.color}55`,
                                 }} />
                               ))}
+                            </div>
+                          )}
+                          {cell.damaged && (
+                            <div style={{
+                              position: "absolute", inset: 0, background: "#ff000018",
+                              border: "2px solid #ff4444", pointerEvents: "none",
+                              display: "flex", alignItems: "flex-start", justifyContent: "flex-end",
+                              padding: 3,
+                            }}>
+                              <span style={{ fontSize: 10 }}>⚠</span>
                             </div>
                           )}
                         </>
@@ -904,6 +1103,7 @@ export default function Speranza() {
             <div style={{ background: "#080b14", border: "1px solid #1e3a5f", borderRadius: 8, padding: 10 }}>
               <div style={{ color: "#4ab3f4", fontSize: 10, letterSpacing: 2, marginBottom: 8 }}>BUILD ROOM</div>
               {Object.entries(ROOM_TYPES).map(([key, def]) => {
+                if (def.requiresTech && !unlockedTechs.includes(def.requiresTech)) return null;
                 const costStr   = Object.entries(def.cost).map(([r, a]) => `${a} ${r}`).join(", ");
                 const canAfford = Object.entries(def.cost).every(([r, a]) => res[r] >= a);
                 return (
@@ -935,7 +1135,14 @@ export default function Speranza() {
               <div style={{ color: ROOM_TYPES[selCell.type].color, fontSize: 11, letterSpacing: 1, marginBottom: 3 }}>
                 {ROOM_TYPES[selCell.type].icon} {ROOM_TYPES[selCell.type].label.toUpperCase()}
               </div>
-              <div style={{ color: "#445", fontSize: 8, marginBottom: 8 }}>{ROOM_TYPES[selCell.type].desc}</div>
+              <div style={{ color: "#445", fontSize: 8, marginBottom: selCell.damaged ? 6 : 8 }}>{ROOM_TYPES[selCell.type].desc}</div>
+
+              {selCell.damaged && (
+                <div style={{ background: "#1a0000", border: "1px solid #ff4444", borderRadius: 4, padding: "5px 7px", marginBottom: 8 }}>
+                  <div style={{ color: "#ff4444", fontSize: 8, fontWeight: "bold" }}>⚠ STRUCTURAL DAMAGE</div>
+                  <div style={{ color: "#884444", fontSize: 7, marginTop: 2 }}>Room offline — not producing. Repair to restore.</div>
+                </div>
+              )}
 
               {ROOM_TYPES[selCell.type].cap > 0 && (
                 <>
@@ -1084,8 +1291,29 @@ export default function Speranza() {
                 </div>
               )}
 
-              <div style={{ display: "flex", gap: 5, marginTop: 10 }}>
+              {/* Sentry Post status */}
+              {selCell.type === "sentryPost" && (
+                <div style={{ marginTop: 10 }}>
+                  <div style={{ color: "#e8d44d", fontSize: 9, letterSpacing: 1, marginBottom: 4 }}>SENTRY STATUS</div>
+                  <div style={{ background: "#0d0f00", border: "1px solid #e8d44d33", borderRadius: 4, padding: "6px 8px" }}>
+                    {selCell.workers === 0 ? (
+                      <div style={{ color: "#5a5020", fontSize: 8 }}>No sentries assigned.</div>
+                    ) : (
+                      <>
+                        <div style={{ color: "#c8d0d8", fontSize: 9 }}>🪖 {selCell.workers} sentry{selCell.workers > 1 ? "ies" : ""} active</div>
+                        <div style={{ color: "#e8d44d", fontSize: 8, marginTop: 3 }}>-{selCell.workers * 5} threat/tick</div>
+                        <div style={{ color: "#5a5020", fontSize: 7, marginTop: 2 }}>Sentries are exposed during raids.</div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              <div style={{ display: "flex", gap: 5, marginTop: 10, flexWrap: "wrap" }}>
                 <button onClick={() => { setSelected(null); setBuildMenu(false); }} style={{ flex: 1, background: "none", border: "1px solid #1e2a3a", borderRadius: 4, color: "#445", padding: 4, cursor: "pointer", fontSize: 9 }}>CLOSE</button>
+                {selCell.damaged && (
+                  <button onClick={() => handleRepair(selected.r, selected.c)} style={{ flex: 1, background: "#001a0a", border: "1px solid #20a040", borderRadius: 4, color: "#4ca060", padding: 4, cursor: "pointer", fontSize: 9 }}>🔧 REPAIR (20 scrap)</button>
+                )}
                 <button onClick={() => handleDemolish(selected.r, selected.c)} style={{ flex: 1, background: "#1a0000", border: "1px solid #5a2020", borderRadius: 4, color: "#844", padding: 4, cursor: "pointer", fontSize: 9 }}>DEMOLISH</button>
               </div>
             </div>
@@ -1172,6 +1400,10 @@ export default function Speranza() {
         @keyframes toastIn {
           from { opacity: 0; transform: translateY(-8px); }
           to   { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes raidPulse {
+          0%, 100% { box-shadow: 0 0 24px #ff444444; }
+          50%       { box-shadow: 0 0 40px #ff4444aa; }
         }
       `}</style>
     </div>
