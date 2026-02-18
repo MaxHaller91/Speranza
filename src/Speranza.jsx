@@ -126,13 +126,13 @@ const ROOM_TYPES = {
   radioTower: {
     label: "Radio Tower",    icon: "📡", color: "#4ab3f4", bg: "#001020", border: "#4ab3f4",
     cost: { scrap: 40 },    produces: {}, consumes: { energy: 1 }, cap: 0,
-    desc: "Reveals incoming raid size when a raid window opens. (Coming soon)",
+    desc: "Reveals incoming raid size when a raid window opens. Without it, raid size is unknown until it strikes.",
     special: "radioTower", requiresTech: "radioTower",
   },
   shelter: {
     label: "Shelter",        icon: "🏠", color: "#7ecfb4", bg: "#001a12", border: "#7ecfb4",
     cost: { scrap: 50 },    produces: {}, consumes: {}, cap: 0,
-    desc: "Sound the alarm to protect colonists — sheltered colonists are immune to raids. (Coming soon)",
+    desc: "Sound the alarm to shelter colonists. Sheltered colonists are immune to Arc strikes.",
     special: "shelter", requiresTech: "shelter",
   },
 };
@@ -190,6 +190,7 @@ const STATUS_COLOR = {
   onExpedition:  "#f5a623",
   injured:       "#ff4444",
   onSentry:      "#e8d44d",
+  sheltered:     "#7ecfb4",
 };
 const STATUS_LABEL = {
   idle:          "IDLE",
@@ -197,6 +198,7 @@ const STATUS_LABEL = {
   onExpedition:  "DEPLOYED",
   injured:       "INJURED",
   onSentry:      "ON SENTRY",
+  sheltered:     "SHELTERED",
 };
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -726,6 +728,24 @@ export default function Speranza() {
     playExpedition();
   };
 
+  const handleSoundAlarm = () => {
+    // Shelter idle and working colonists; unassign them from rooms
+    setColonists(prev => prev.map(c =>
+      (c.status === "idle" || c.status === "working") ? { ...c, status: "sheltered" } : c
+    ));
+    setGrid(prev => prev.map(row => row.map(cell => ({ ...cell, workers: 0 }))));
+    addLog("🏠 ALARM SOUNDED — colonists sheltering. Production halted.");
+    addToast("🏠 ALARM SOUNDED\nColonists are sheltering.\nThey are immune to Arc strikes.", "info");
+  };
+
+  const handleBackToWork = () => {
+    setColonists(prev => prev.map(c =>
+      c.status === "sheltered" ? { ...c, status: "idle" } : c
+    ));
+    addLog("🏠 All clear — colonists returned to idle. Reassign them to rooms.");
+    addToast("🏠 ALL CLEAR\nColonists returning from shelter.\nReassign them to restore production.", "success");
+  };
+
   const handleRestart = () => {
     nameIdx = 0;
     setGrid(initGrid());
@@ -744,9 +764,10 @@ export default function Speranza() {
   };
 
   // ── Derived UI ────────────────────────────────────────────────────────────
-  const selCell     = selected ? grid[selected.r][selected.c] : null;
-  const armoryArmed = grid.flatMap(r => r).some(c => c.type === "armory" && c.workers > 0);
-  const threatPct   = threat / THREAT_RAID_THRESHOLD * 100;
+  const selCell      = selected ? grid[selected.r][selected.c] : null;
+  const armoryArmed  = grid.flatMap(r => r).some(c => c.type === "armory" && c.workers > 0);
+  const hasRadioTower = grid.flatMap(r => r).some(c => c.type === "radioTower");
+  const threatPct    = threat / THREAT_RAID_THRESHOLD * 100;
   const threatColor = raidWindow ? "#ff4444" : threatPct < 40 ? "#7ed321" : threatPct < 70 ? "#f5a623" : "#ff4444";
   const threatLabel = threatPct < 40 ? "LOW" : threatPct < 70 ? "ELEVATED" : threatPct < 90 ? "HIGH" : "CRITICAL";
 
@@ -824,8 +845,10 @@ export default function Speranza() {
             </div>
             {raidWindow ? (
               <div style={{ fontSize: 8, color: "#ff4444", letterSpacing: 1, fontWeight: "bold" }}>
-                {RAID_SIZES[RAID_SIZE_ORDER[raidWindow.sizeIdx]].icon} {RAID_SIZES[RAID_SIZE_ORDER[raidWindow.sizeIdx]].label} RAID INCOMING — rolling each tick
-                {unlockedTechs.includes("barricades") && ` · 🛡 ${Math.round({ small:75, medium:30, large:10 }[RAID_SIZE_ORDER[raidWindow.sizeIdx]])}% block`}
+                {hasRadioTower
+                  ? `${RAID_SIZES[RAID_SIZE_ORDER[raidWindow.sizeIdx]].icon} ${RAID_SIZES[RAID_SIZE_ORDER[raidWindow.sizeIdx]].label} RAID INCOMING — rolling each tick`
+                  : "❓ UNKNOWN RAID INCOMING — rolling each tick"}
+                {hasRadioTower && unlockedTechs.includes("barricades") && ` · 🛡 ${Math.round({ small:75, medium:30, large:10 }[RAID_SIZE_ORDER[raidWindow.sizeIdx]])}% block`}
               </div>
             ) : (
               <div style={{ fontSize: 8, color: "#2a4a6a" }}>
@@ -913,14 +936,17 @@ export default function Speranza() {
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
               <div>
                 <div style={{ color: "#ff6622", fontSize: 13, fontWeight: "bold", letterSpacing: 2 }}>
-                  {RAID_SIZES[RAID_SIZE_ORDER[raidWindow.sizeIdx]].icon} {RAID_SIZES[RAID_SIZE_ORDER[raidWindow.sizeIdx]].label} RAID INCOMING
+                  {hasRadioTower
+                    ? `${RAID_SIZES[RAID_SIZE_ORDER[raidWindow.sizeIdx]].icon} ${RAID_SIZES[RAID_SIZE_ORDER[raidWindow.sizeIdx]].label} RAID INCOMING`
+                    : "❓ UNKNOWN RAID INCOMING"}
                 </div>
                 <div style={{ color: "#7a3a1a", fontSize: 9, marginTop: 3, letterSpacing: 1 }}>
                   Arc forces mobilizing — {Math.round(RAID_LAUNCH_CHANCE * 100)}% strike chance each tick
                   {raidWindow.escalations > 0 && ` · escalated ${raidWindow.escalations}×`}
+                  {!hasRadioTower && " · 📡 build Radio Tower to identify"}
                 </div>
               </div>
-              {unlockedTechs.includes("barricades") && (
+              {hasRadioTower && unlockedTechs.includes("barricades") && (
                 <div style={{ color: "#4a8a4a", fontSize: 9, letterSpacing: 1 }}>
                   🛡 {Math.round({ small: 75, medium: 30, large: 10 }[RAID_SIZE_ORDER[raidWindow.sizeIdx]])}% block chance
                 </div>
@@ -1290,6 +1316,40 @@ export default function Speranza() {
                   })}
                 </div>
               )}
+
+              {/* Shelter panel */}
+              {selCell.type === "shelter" && (() => {
+                const sheltered = colonists.filter(c => c.status === "sheltered");
+                const alarmOn   = sheltered.length > 0;
+                return (
+                  <div style={{ marginTop: 10 }}>
+                    <div style={{ color: "#7ecfb4", fontSize: 9, letterSpacing: 1, marginBottom: 6 }}>
+                      SHELTER STATUS — {sheltered.length} sheltering
+                    </div>
+                    {alarmOn ? (
+                      <>
+                        <div style={{ background: "#001a0f", border: "1px solid #7ecfb433", borderRadius: 4, padding: "6px 8px", marginBottom: 8 }}>
+                          {sheltered.map(col => (
+                            <div key={col.id} style={{ color: "#7ecfb4", fontSize: 9, paddingBottom: 2 }}>🏠 {col.name}</div>
+                          ))}
+                        </div>
+                        <button onClick={handleBackToWork} style={{ width: "100%", background: "#001a0f", border: "1px solid #7ecfb4", borderRadius: 4, color: "#7ecfb4", padding: "6px 8px", cursor: "pointer", fontSize: 9, letterSpacing: 1 }}>
+                          🏠 BACK TO WORK
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <div style={{ fontSize: 8, color: "#446655", marginBottom: 6 }}>
+                          Sounds the alarm and pulls all idle/working colonists into shelter. Production stops but they cannot be targeted by Arc strikes.
+                        </div>
+                        <button onClick={handleSoundAlarm} style={{ width: "100%", background: "#1a0808", border: "1px solid #ff4444", borderRadius: 4, color: "#ff6666", padding: "6px 8px", cursor: "pointer", fontSize: 9, letterSpacing: 1 }}>
+                          🚨 SOUND ALARM
+                        </button>
+                      </>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* Sentry Post status */}
               {selCell.type === "sentryPost" && (
