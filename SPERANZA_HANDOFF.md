@@ -1,12 +1,38 @@
 # SPERANZA UNDERGROUND — Project Handoff Document
 
 ## What This Is
-A browser-based Fallout Shelter / Oxygen Not Included-style colony management game set in the Arc Raiders universe. Built as a single React JSX artifact, runs entirely in the browser with no build tools. The player manages an underground colony surviving Arc raids while expanding and researching new technology.
+A browser-based Fallout Shelter / Oxygen Not Included-style colony management game set in the Arc Raiders universe. Built as a single React JSX component, deployed via Vite + GitHub Pages. The player manages an underground colony surviving Arc raids while expanding and researching new technology.
+
+**Live URL:** https://maxhaller91.github.io/Speranza/
+**Repo:** https://github.com/MaxHaller91/Speranza
 
 ---
 
 ## Current File
-`speranza.jsx` — single file React component, ~1160 lines. No external dependencies beyond React.
+`src/Speranza.jsx` — single file React component, ~1160 lines. No external dependencies beyond React.
+
+## Project Structure
+```
+├── src/
+│   ├── Speranza.jsx   ← all game logic lives here
+│   └── main.jsx       ← React entry point (mounts Speranza)
+├── index.html         ← HTML shell
+├── vite.config.js     ← sets base path to /Speranza/ for GitHub Pages
+├── package.json       ← React + Vite dependencies
+├── .github/
+│   └── workflows/
+│       └── deploy.yml ← auto-builds & deploys on every push to main
+└── speranza (4).jsx   ← original source file (keep for reference)
+```
+
+## Deploying Changes
+Edit `src/Speranza.jsx`, then:
+```
+git add .
+git commit -m "your message"
+git push origin main
+```
+GitHub Actions builds and deploys automatically (~30s). No manual steps needed.
 
 ---
 
