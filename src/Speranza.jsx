@@ -47,6 +47,16 @@ const T2_TECHS = {
   },
 };
 
+// ─── Colonist Traits ──────────────────────────────────────────────────────────
+const TRAITS = {
+  veteran:   { label: "VETERAN",    icon: "🎖", color: "#f5a623", desc: "Never flees during raids." },
+  ironLungs: { label: "IRON LUNGS", icon: "💪", color: "#ff6b9d", desc: "Heals 2× faster when injured." },
+  scavenger: { label: "SCAVENGER",  icon: "🎒", color: "#bd10e0", desc: "+50% scrap from expeditions." },
+  ghost:     { label: "GHOST",      icon: "👻", color: "#4ab3f4", desc: "50% less likely to be targeted in raids." },
+  hardened:  { label: "HARDENED",   icon: "🛡", color: "#7ed321", desc: "Injury chance reduced — 20% instead of 30%." },
+};
+const TRAIT_KEYS = Object.keys(TRAITS);
+
 // ─── Name Pool (Arc Raiders style) ───────────────────────────────────────────
 const NAME_POOL = [
   "VASQUEZ","CHEN","OKAFOR","REYES","TAKEDA","MORROW","SOLÍS","BOREK",
@@ -66,8 +76,11 @@ function nextName() {
 // working     — assigned to a room
 // onExpedition — away on a surface mission
 // (injured comes next pass)
+const COLONIST_BASE = () => ({
+  xp: 0, level: 0, traits: [], dutyTicks: 0, ticksAlive: 0, pendingTraitPick: false,
+});
 function makeColonist() {
-  return { id: `c${Date.now()}-${Math.random()}`, name: nextName(), status: "idle" };
+  return { id: `c${Date.now()}-${Math.random()}`, name: nextName(), status: "idle", ...COLONIST_BASE() };
 }
 
 // ─── Room Definitions ─────────────────────────────────────────────────────────
@@ -168,9 +181,9 @@ function makeGrid() {
 function initColonists() {
   nameIdx = 0;
   return [
-    { id: "c0", name: nextName(), status: "working" },  // in workshop
-    { id: "c1", name: nextName(), status: "working" },  // in power cell
-    { id: "c2", name: nextName(), status: "idle"    },
+    { id: "c0", name: nextName(), status: "working", ...COLONIST_BASE() },
+    { id: "c1", name: nextName(), status: "working", ...COLONIST_BASE() },
+    { id: "c2", name: nextName(), status: "idle",    ...COLONIST_BASE() },
   ];
 }
 
@@ -427,7 +440,7 @@ export default function Speranza() {
 
         // Strike fires this tick
         if (newStrikeCD <= 0 && newTicksLeft > 0) {
-          const atRisk = cols.filter(c => c.status === "working" || c.status === "onSentry");
+          const atRisk = cols.filter(c => c.status === "working" || c.status === "onSentry" || c.status === "idle");
           const targets = atRisk.slice(0, sizeDef.targets);
           if (targets.length === 0) {
             addLog(`💢 ${sizeDef.icon} ARC STRIKE — no exposed workers. Colony holds!`);
@@ -560,6 +573,29 @@ export default function Speranza() {
           return { ...col, injuryTicksLeft: newTicks };
         });
       });
+
+      // 5. XP accumulation ─────────────────────────────────────────────────
+      // All living colonists age. On-duty colonists earn 1 XP per 10 duty ticks.
+      // Level up every 20 XP → pendingTraitPick flag set.
+      setColonists(prev => prev.map(col => {
+        const onDuty   = col.status === "working" || col.status === "onSentry";
+        const newAlive = (col.ticksAlive ?? 0) + 1;
+        const newDuty  = (col.dutyTicks  ?? 0) + (onDuty ? 1 : 0);
+        const newXp    = (col.xp ?? 0) + (onDuty && newDuty % 10 === 0 ? 1 : 0);
+        const newLevel = Math.floor(newXp / 20);
+        const leveled  = newLevel > (col.level ?? 0);
+        if (leveled) {
+          addLog(`⭐ ${col.name} reached Level ${newLevel}! Trait selection available.`);
+        }
+        return {
+          ...col,
+          ticksAlive:       newAlive,
+          dutyTicks:        newDuty,
+          xp:               newXp,
+          level:            newLevel,
+          pendingTraitPick: leveled ? true : col.pendingTraitPick,
+        };
+      }));
 
       setTick(t => t + 1);
     }, TICK_MS / timescale);
@@ -706,6 +742,19 @@ export default function Speranza() {
     addLog(`🔬 ${tech.icon} ${tech.label} unlocked!`);
     addToast(`🔬 RESEARCH COMPLETE\n${tech.icon} ${tech.label} unlocked.`, "success");
     playSuccess();
+  };
+
+  const handlePickTrait = (colonistId, traitKey) => {
+    const trait = TRAITS[traitKey];
+    if (!trait) return;
+    setColonists(prev => prev.map(col => {
+      if (col.id !== colonistId) return col;
+      if (col.traits.includes(traitKey)) return col;
+      const newTraits = [...col.traits, traitKey];
+      addLog(`${trait.icon} ${col.name} gained trait: ${trait.label}`);
+      addToast(`${trait.icon} TRAIT ACQUIRED\n${col.name} — ${trait.label}\n${trait.desc}`, "success");
+      return { ...col, traits: newTraits, pendingTraitPick: false };
+    }));
   };
 
   const handleLaunchExpedition = (type) => {
@@ -956,6 +1005,44 @@ export default function Speranza() {
         </div>
       )}
 
+      {/* ── TRAIT PICKER MODAL ── */}
+      {colonists.filter(c => c.pendingTraitPick).map(col => (
+        <div key={col.id} style={{
+          width: "100%", maxWidth: 920, marginBottom: 10,
+          background: "#120d00", border: "2px solid #f5a623",
+          borderRadius: 8, padding: "12px 16px",
+          boxShadow: "0 0 30px #f5a62344",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+            <div style={{ fontSize: 16 }}>⭐</div>
+            <div>
+              <div style={{ color: "#f5a623", fontSize: 12, fontWeight: "bold", letterSpacing: 2 }}>
+                {col.name} — LEVEL {col.level} REACHED
+              </div>
+              <div style={{ color: "#7a5a20", fontSize: 8, letterSpacing: 1, marginTop: 2 }}>
+                Choose a trait. This is permanent.
+              </div>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {TRAIT_KEYS.filter(k => !col.traits.includes(k)).map(traitKey => {
+              const trait = TRAITS[traitKey];
+              return (
+                <button key={traitKey} onClick={() => handlePickTrait(col.id, traitKey)} style={{
+                  flex: "1 1 140px", background: "#0d0900", border: `1px solid ${trait.color}66`,
+                  borderRadius: 6, padding: "8px 10px", cursor: "pointer", textAlign: "left",
+                }}>
+                  <div style={{ color: trait.color, fontSize: 11, fontWeight: "bold", marginBottom: 3 }}>
+                    {trait.icon} {trait.label}
+                  </div>
+                  <div style={{ color: "#5a5040", fontSize: 8, lineHeight: 1.4 }}>{trait.desc}</div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+
       {/* ── GAME OVER ── */}
       {gameOver && (
         <div style={{ background: "#1a0000", border: "2px solid #ff3333", borderRadius: 8, padding: 24, marginBottom: 14, textAlign: "center" }}>
@@ -1086,32 +1173,79 @@ export default function Speranza() {
 
             {rosterOpen && (
               <div style={{ padding: "0 12px 10px", display: "flex", flexWrap: "wrap", gap: 6 }}>
-                {colonists.map(col => (
-                  <div key={col.id} style={{
-                    display: "flex", alignItems: "center", gap: 6,
-                    background: "#0a0c14", border: `1px solid ${STATUS_COLOR[col.status]}33`,
-                    borderRadius: 5, padding: "4px 8px", minWidth: 120,
-                  }}>
-                    <div style={{
-                      width: 7, height: 7, borderRadius: "50%", flexShrink: 0,
-                      background: STATUS_COLOR[col.status],
-                      boxShadow: `0 0 4px ${STATUS_COLOR[col.status]}`,
-                    }} />
-                    <div>
-                      <div style={{ color: "#c8d0d8", fontSize: 9, fontWeight: "bold", letterSpacing: 1 }}>
-                        {col.name}
-                      </div>
-                      <div style={{ color: STATUS_COLOR[col.status], fontSize: 7, letterSpacing: 1 }}>
-                        {STATUS_LABEL[col.status]}
-                      </div>
-                      {col.status === "injured" && col.injuryTicksLeft > 0 && (
-                        <div style={{ color: "#ff6b6b", fontSize: 7, letterSpacing: 0.5, marginTop: 1 }}>
-                          ⚕ {col.injuryTicksLeft} tick{col.injuryTicksLeft !== 1 ? "s" : ""} to recover
+                {colonists.map(col => {
+                  const xpInLevel  = (col.xp ?? 0) % 20;
+                  const hasPending = col.pendingTraitPick;
+                  const borderColor = hasPending ? "#f5a623" : STATUS_COLOR[col.status];
+                  return (
+                    <div key={col.id} style={{
+                      display: "flex", alignItems: "flex-start", gap: 6,
+                      background: hasPending ? "#1a1000" : "#0a0c14",
+                      border: `1px solid ${borderColor}${hasPending ? "" : "33"}`,
+                      borderRadius: 5, padding: "4px 8px", minWidth: 130,
+                      boxShadow: hasPending ? `0 0 8px #f5a62366` : "none",
+                    }}>
+                      <div style={{
+                        width: 7, height: 7, borderRadius: "50%", flexShrink: 0, marginTop: 3,
+                        background: STATUS_COLOR[col.status],
+                        boxShadow: `0 0 4px ${STATUS_COLOR[col.status]}`,
+                      }} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        {/* Name row */}
+                        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                          <div style={{ color: "#c8d0d8", fontSize: 9, fontWeight: "bold", letterSpacing: 1 }}>
+                            {col.name}
+                          </div>
+                          {(col.level ?? 0) > 0 && (
+                            <div style={{ color: "#f5a623", fontSize: 7, background: "#1a1000", border: "1px solid #f5a62344", borderRadius: 3, padding: "0px 3px" }}>
+                              Lv{col.level}
+                            </div>
+                          )}
+                          {hasPending && <div style={{ color: "#f5a623", fontSize: 9 }}>⭐</div>}
                         </div>
-                      )}
+                        {/* Status */}
+                        <div style={{ color: STATUS_COLOR[col.status], fontSize: 7, letterSpacing: 1 }}>
+                          {STATUS_LABEL[col.status]}
+                        </div>
+                        {/* Injury countdown */}
+                        {col.status === "injured" && col.injuryTicksLeft > 0 && (
+                          <div style={{ color: "#ff6b6b", fontSize: 7, letterSpacing: 0.5, marginTop: 1 }}>
+                            ⚕ {col.injuryTicksLeft} tick{col.injuryTicksLeft !== 1 ? "s" : ""} to recover
+                          </div>
+                        )}
+                        {/* XP bar */}
+                        <div style={{ marginTop: 3, display: "flex", alignItems: "center", gap: 4 }}>
+                          <div style={{ flex: 1, height: 3, background: "#1a1a2e", borderRadius: 2, overflow: "hidden" }}>
+                            <div style={{
+                              height: "100%", borderRadius: 2,
+                              width: `${(xpInLevel / 20) * 100}%`,
+                              background: hasPending ? "#f5a623" : "#2a5a8a",
+                              transition: "width 0.4s",
+                            }} />
+                          </div>
+                          <div style={{ color: "#2a4a6a", fontSize: 6, fontFamily: "monospace", flexShrink: 0 }}>
+                            {xpInLevel}/20
+                          </div>
+                        </div>
+                        {/* Trait pips */}
+                        {col.traits && col.traits.length > 0 && (
+                          <div style={{ display: "flex", gap: 3, marginTop: 3, flexWrap: "wrap" }}>
+                            {col.traits.map(t => (
+                              <div key={t} title={TRAITS[t]?.desc} style={{
+                                fontSize: 8, background: "#0a0a14",
+                                border: `1px solid ${TRAITS[t]?.color ?? "#333"}44`,
+                                borderRadius: 3, padding: "0 3px",
+                                color: TRAITS[t]?.color ?? "#888",
+                              }}>
+                                {TRAITS[t]?.icon} {TRAITS[t]?.label}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
