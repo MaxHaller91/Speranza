@@ -148,6 +148,25 @@ const ROOM_TYPES = {
     desc: "Sound the alarm to shelter colonists. Sheltered colonists are immune to Arc strikes.",
     special: "shelter", requiresTech: "shelter",
   },
+  tavern: {
+    label: "Tavern",         icon: "🍺", color: "#d4a843", bg: "#1a1000", border: "#d4a843",
+    cost: { scrap: 40 },    produces: {}, consumes: { water: 1, energy: 1 }, cap: 2,
+    desc: "Boosts colony morale. Each bartender generates +1.5 morale/tick. Requires water + energy.",
+    special: "tavern",
+  },
+  diningHall: {
+    label: "Dining Hall",    icon: "🍽", color: "#e8855a", bg: "#1a0a00", border: "#e8855a",
+    cost: { scrap: 35 },    produces: {}, consumes: { food: 2, energy: 1 }, cap: 2,
+    desc: "Boosts colony morale. Each cook generates +1.5 morale/tick. Requires food + energy.",
+    special: "diningHall",
+  },
+};
+
+// ─── Excavation Definitions ───────────────────────────────────────────────────
+const EXCAVATION_DEFS = {
+  1: { scrap: 40,  workers: 1, ticks: 15, label: "-20m", discovery: "Old utility tunnels. Power Cell costs 5 less scrap on this level." },
+  2: { scrap: 80,  workers: 2, ticks: 25, label: "-30m", discovery: "Pre-Arc storage vaults. +60 scrap found in the rubble." },
+  3: { scrap: 150, workers: 2, ticks: 40, label: "-40m", discovery: "Deep geothermal vents detected. Geothermal Generator unlocked." },
 };
 
 // ─── Expedition Definitions ───────────────────────────────────────────────────
@@ -189,9 +208,9 @@ function initColonists() {
 
 function initGrid() {
   const g = makeGrid();
-  g[3][0] = { id: "3-0", type: "workshop", workers: 1, damaged: false };
-  g[3][1] = { id: "3-1", type: "power",    workers: 1, damaged: false };
-  g[3][2] = { id: "3-2", type: "barracks", workers: 0, damaged: false };
+  g[0][0] = { id: "0-0", type: "workshop", workers: 1, damaged: false };
+  g[0][1] = { id: "0-1", type: "power",    workers: 1, damaged: false };
+  g[0][2] = { id: "0-2", type: "barracks", workers: 0, damaged: false };
   return g;
 }
 
@@ -204,6 +223,7 @@ const STATUS_COLOR = {
   injured:       "#ff4444",
   onSentry:      "#e8d44d",
   sheltered:     "#7ecfb4",
+  excavating:    "#a0522d",
 };
 const STATUS_LABEL = {
   idle:          "IDLE",
@@ -212,6 +232,7 @@ const STATUS_LABEL = {
   injured:       "INJURED",
   onSentry:      "ON SENTRY",
   sheltered:     "SHELTERED",
+  excavating:    "EXCAVATING",
 };
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -244,6 +265,11 @@ export default function Speranza() {
   const [isMuted,     setIsMuted]     = useState(false);
   // activeRaid: null | { sizeKey, ticksLeft, strikeCountdown }
   const [activeRaid,  setActiveRaid]  = useState(null);
+  // Pass 1 new state
+  const [morale,        setMorale]        = useState(50);
+  const [unlockedRows,  setUnlockedRows]  = useState([0]);
+  const [surfaceHaul,   setSurfaceHaul]   = useState({ salvage: 0, arcTech: 0, schematics: [] });
+  const [excavations,   setExcavations]   = useState({});
 
   // ── Derived ───────────────────────────────────────────────────────────────
   // These are computed from colonists array — no separate state needed
@@ -277,6 +303,14 @@ export default function Speranza() {
   useEffect(() => { timescaleRef.current     = timescale;     }, [timescale]);
   useEffect(() => { tickRef.current          = tick;          }, [tick]);
   useEffect(() => { activeRaidRef.current    = activeRaid;    }, [activeRaid]);
+  const moraleRef       = useRef(morale);
+  const unlockedRowsRef = useRef(unlockedRows);
+  const surfaceHaulRef  = useRef(surfaceHaul);
+  const excavationsRef  = useRef(excavations);
+  useEffect(() => { moraleRef.current       = morale;       }, [morale]);
+  useEffect(() => { unlockedRowsRef.current = unlockedRows; }, [unlockedRows]);
+  useEffect(() => { surfaceHaulRef.current  = surfaceHaul;  }, [surfaceHaul]);
+  useEffect(() => { excavationsRef.current  = excavations;  }, [excavations]);
 
   // ── Audio: start music on first interaction ───────────────────────────────
   const handleFirstInteraction = useCallback(() => {
@@ -299,6 +333,13 @@ export default function Speranza() {
     setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 4500);
   }, []);
 
+  const changeMorale = useCallback((delta, reason) => {
+    setMorale(prev => clamp(prev + delta, -100, 100));
+    if (Math.abs(delta) >= 10) addLog(`${delta > 0 ? "📈" : "📉"} Morale ${delta > 0 ? "+" : ""}${delta} — ${reason}`);
+  }, []);
+  const changeMoraleRef = useRef(changeMorale);
+  useEffect(() => { changeMoraleRef.current = changeMorale; }, [changeMorale]);
+
   // ── Main tick ─────────────────────────────────────────────────────────────
   useEffect(() => {
     if (timescale === 0) return; // paused — no interval
@@ -310,6 +351,22 @@ export default function Speranza() {
       const exp  = expedRef.current;
       const totalCol = cols.length;
 
+      // 0. Passive morale ────────────────────────────────────────────────────
+      {
+        let moraleWorkers = 0;
+        g.forEach(row => row.forEach(cell => {
+          if ((cell.type === "tavern" || cell.type === "diningHall") && cell.workers > 0) {
+            moraleWorkers += cell.workers;
+          }
+        }));
+        const moraleDrain    = totalCol * 0.3;
+        const moraleGain     = moraleWorkers * 1.5;
+        const netMoraleDelta = moraleGain - moraleDrain;
+        setMorale(prev => clamp(prev + netMoraleDelta, -100, 100));
+        const veteranCount = cols.filter(c => c.traits?.includes("veteran")).length;
+        if (veteranCount > 0) setMorale(prev => clamp(prev + veteranCount * 0.1, -100, 100));
+      }
+
       // 1. Resource production ───────────────────────────────────────────────
       setRes(prev => {
         const next = { ...prev };
@@ -318,7 +375,7 @@ export default function Speranza() {
         g.forEach(row => row.forEach(cell => {
           if (!cell.type || !cell.workers) return;
           const def = ROOM_TYPES[cell.type];
-          if (def.special === "barracks" || def.special === "armory") return;
+          if (def.special === "barracks" || def.special === "armory" || def.special === "tavern" || def.special === "diningHall") return;
           if (cell.damaged) return; // damaged rooms don't produce
 
           let canRun = true;
@@ -345,11 +402,34 @@ export default function Speranza() {
           }
         }));
 
+        // Tavern + Dining Hall resource consumption
+        g.forEach(row => row.forEach(cell => {
+          if (cell.type === "tavern" && cell.workers > 0) {
+            next.water  = clamp(next.water  - 1 * cell.workers, 0, MAX_RES);
+            next.energy = clamp(next.energy - 1 * cell.workers, 0, MAX_RES);
+            flow.water  -= 1 * cell.workers;
+            flow.energy -= 1 * cell.workers;
+          }
+          if (cell.type === "diningHall" && cell.workers > 0) {
+            next.food   = clamp(next.food   - 2 * cell.workers, 0, MAX_RES);
+            next.energy = clamp(next.energy - 1 * cell.workers, 0, MAX_RES);
+            flow.food   -= 2 * cell.workers;
+            flow.energy -= 1 * cell.workers;
+          }
+        }));
+
         // Colonist upkeep — based on total headcount
         for (const [r, amt] of Object.entries(DRAIN_PER_COL)) {
           const drain = amt * totalCol;
           next[r]  = clamp(next[r] - drain, 0, MAX_RES);
           flow[r] -= drain;
+        }
+
+        // Morale production bonus — morale > 75 gives +10% of positive flow
+        if (moraleRef.current > 75) {
+          for (const [r, val] of Object.entries(flow)) {
+            if (val > 0) next[r] = clamp(next[r] + val * 0.1, 0, MAX_RES);
+          }
         }
 
         setNetFlow(flow);
@@ -385,6 +465,7 @@ export default function Speranza() {
             setTimeout(() => setRaidFlash(false), 500);
             setRaidWindow(null);
             setThreat(25);
+            changeMoraleRef.current(10, "barricades held");
           } else {
             // ── Begin active raid phase ──────────────────────────────────────
             setActiveRaid({ sizeKey, ticksLeft: sizeDef.duration, strikeCountdown: sizeDef.strikeEvery });
@@ -440,6 +521,7 @@ export default function Speranza() {
 
         // Strike fires this tick
         if (newStrikeCD <= 0 && newTicksLeft > 0) {
+          changeMoraleRef.current(-3, "raid strike landed");
           const atRisk = cols.filter(c => c.status === "working" || c.status === "onSentry" || c.status === "idle");
           const targets = atRisk.slice(0, sizeDef.targets);
           if (targets.length === 0) {
@@ -465,16 +547,19 @@ export default function Speranza() {
                 setColonists(prev => prev.map(c => c.id === target.id ? { ...c, status: "idle" } : c));
                 addLog(`  → ${target.name} fled their post!`);
                 addToast(`💢 ${sizeDef.label} STRIKE\n${target.name} fled — shaken but alive.`, "raid");
+                changeMoraleRef.current(-5, "colonist fled");
               } else if (roll < 0.80) {
                 setColonists(prev => prev.map(c => c.id === target.id ? { ...c, status: "injured", injuryTicksLeft: INJURY_TICKS_BASE } : c));
                 addLog(`  → ${target.name} was INJURED!`);
                 addToast(`💢 ${sizeDef.label} STRIKE — CASUALTY\n${target.name} is injured.`, "injury");
                 playInjury();
+                changeMoraleRef.current(-10, "colonist injured in raid");
               } else {
                 setColonists(prev => prev.filter(c => c.id !== target.id));
                 addLog(`  → ${target.name} was KILLED.`);
                 addToast(`💢 ${sizeDef.label} STRIKE — KIA\n${target.name} did not make it.`, "raid");
                 playKill();
+                changeMoraleRef.current(-20, "colonist killed");
               }
             });
           }
@@ -508,6 +593,7 @@ export default function Speranza() {
           addLog(`✅ ${sizeDef.label} raid repelled — Arc forces withdrew.`);
           addToast(`✅ RAID OVER\n${sizeDef.label} Arc forces withdrew.\nThreat level reset.`, "success");
           playSuccess();
+          changeMoraleRef.current(8, "raid survived");
         } else {
           setActiveRaid({
             ...arNow,
@@ -530,6 +616,7 @@ export default function Speranza() {
           if (failed) {
             addLog(`⚠ ${def.icon} ${names} — ${def.failMsg}`);
             addToast(`${def.icon} EXPEDITION FAILED\n${names} — ${def.failMsg}`, "injury");
+            changeMoraleRef.current(-5, "mission failed");
           } else {
             const rewardStr = Object.entries(def.reward).map(([r, a]) => `+${a} ${r}`).join("  ");
             addLog(`✅ ${def.icon} ${names} returned! ${Object.entries(def.reward).map(([r, a]) => `+${a} ${r}`).join(", ")}`);
@@ -539,6 +626,7 @@ export default function Speranza() {
               for (const [r, amt] of Object.entries(def.reward)) next[r] = clamp(next[r] + amt, 0, MAX_RES);
               return next;
             });
+            changeMoraleRef.current(8, "successful run");
           }
 
           // Return all expedition colonists to idle (injury system comes next)
@@ -574,6 +662,45 @@ export default function Speranza() {
         });
       });
 
+      // 4b. Morale collapse / strained mechanics ───────────────────────────
+      if (moraleRef.current <= -100) {
+        // 10% chance per tick a colonist deserts
+        if (Math.random() < 0.10) {
+          setColonists(prev => {
+            const vulnerable = prev.filter(c => c.status === "idle" || c.status === "working");
+            if (vulnerable.length === 0) return prev;
+            const deserter = vulnerable[Math.floor(Math.random() * vulnerable.length)];
+            setMorale(p => clamp(p - 15, -100, 100));
+            addLog(`🚪 ${deserter.name} has deserted — morale has collapsed.`);
+            addToast(`🚪 DESERTION\n${deserter.name} left the colony.\nMorale has completely collapsed.`, "raid");
+            return prev.filter(c => c.id !== deserter.id);
+          });
+        }
+      } else if (moraleRef.current < 0 && moraleRef.current > -50) {
+        // 5% chance a working colonist refuses their post
+        if (Math.random() < 0.05) {
+          setColonists(prev => {
+            const working = prev.filter(c => c.status === "working");
+            if (working.length === 0) return prev;
+            const refuser = working[Math.floor(Math.random() * working.length)];
+            addLog(`😤 ${refuser.name} refused their post — morale is strained.`);
+            setGrid(prevGrid => {
+              const ng = prevGrid.map(row => row.map(c => ({ ...c })));
+              const staffed = [];
+              ng.forEach((row, ri) => row.forEach((cell, ci) => {
+                if (cell.type && cell.workers > 0) staffed.push({ r: ri, c: ci });
+              }));
+              if (staffed.length > 0) {
+                const room = staffed[Math.floor(Math.random() * staffed.length)];
+                ng[room.r][room.c].workers = Math.max(0, ng[room.r][room.c].workers - 1);
+              }
+              return ng;
+            });
+            return prev.map(c => c.id === refuser.id ? { ...c, status: "idle" } : c);
+          });
+        }
+      }
+
       // 5. XP accumulation ─────────────────────────────────────────────────
       // All living colonists age. On-duty colonists earn 1 XP per 10 duty ticks.
       // Level up every 20 XP → pendingTraitPick flag set.
@@ -586,6 +713,7 @@ export default function Speranza() {
         const leveled  = newLevel > (col.level ?? 0);
         if (leveled) {
           addLog(`⭐ ${col.name} reached Level ${newLevel}! Trait selection available.`);
+          changeMoraleRef.current(5, "morale boost from achievement");
         }
         return {
           ...col,
@@ -596,6 +724,39 @@ export default function Speranza() {
           pendingTraitPick: leveled ? true : col.pendingTraitPick,
         };
       }));
+
+      // 6. Excavation progress ──────────────────────────────────────────────
+      const excavNow = excavationsRef.current;
+      Object.entries(excavNow).forEach(([rowIdxStr, excav]) => {
+        if (!excav) return;
+        const rowIndex = Number(rowIdxStr);
+        const newTicksLeft = excav.ticksLeft - 1;
+        if (newTicksLeft <= 0) {
+          // Unlock the row
+          setUnlockedRows(prev => prev.includes(rowIndex) ? prev : [...prev, rowIndex]);
+          // Free excavating colonists back to idle
+          setColonists(prev => prev.map(c => c.status === "excavating" ? { ...c, status: "idle" } : c));
+          // Discovery event
+          const def = EXCAVATION_DEFS[rowIndex];
+          if (def) {
+            addLog(`⛏ ${def.label} excavation complete! ${def.discovery}`);
+            addToast(`⛏ EXCAVATION COMPLETE\n${def.label} — Level unlocked!\n${def.discovery}`, "success");
+            // Row 2 discovery: +60 scrap
+            if (rowIndex === 2) {
+              setRes(prev => ({ ...prev, scrap: clamp(prev.scrap + 60, 0, MAX_RES) }));
+            }
+          }
+          playSuccess();
+          // Remove from excavations
+          setExcavations(prev => {
+            const next = { ...prev };
+            delete next[rowIndex];
+            return next;
+          });
+        } else {
+          setExcavations(prev => ({ ...prev, [rowIndex]: { ...excav, ticksLeft: newTicksLeft } }));
+        }
+      });
 
       setTick(t => t + 1);
     }, TICK_MS / timescale);
@@ -627,9 +788,29 @@ export default function Speranza() {
     setBuildMenu(!grid[r][c].type);
   };
 
+  const handleStartExcavation = (rowIndex) => {
+    const def = EXCAVATION_DEFS[rowIndex];
+    if (!def) return;
+    if (unlockedRows.includes(rowIndex)) { addLog("⚠ This level is already excavated"); return; }
+    if (!unlockedRows.includes(rowIndex - 1)) { addLog("⚠ Must excavate the level above first"); return; }
+    if (excavations[rowIndex]) { addLog("⚠ Excavation already in progress for this level"); return; }
+    if (res.scrap < def.scrap) { addLog(`❌ Need ${def.scrap} scrap to excavate ${def.label}`); return; }
+    // Find idle colonists
+    const idle = colonists.filter(c => c.status === "idle");
+    const actualCount = Math.min(def.workers, idle.length);
+    if (actualCount === 0) { addLog("⚠ No idle colonists available for excavation"); return; }
+    const picked = idle.slice(0, actualCount);
+    const totalTicks = Math.ceil(def.ticks * (def.workers / actualCount));
+    setRes(prev => ({ ...prev, scrap: prev.scrap - def.scrap }));
+    setColonists(prev => prev.map(c => picked.find(p => p.id === c.id) ? { ...c, status: "excavating" } : c));
+    setExcavations(prev => ({ ...prev, [rowIndex]: { workersAssigned: actualCount, ticksLeft: totalTicks, totalTicks } }));
+    addLog(`⛏ Excavation of ${def.label} begun. ${actualCount} worker(s) assigned.`);
+  };
+
   const handleBuild = (type) => {
     if (!selected) return;
     const { r, c } = selected;
+    if (!unlockedRows.includes(r)) { addLog("⚠ This level is not excavated yet"); return; }
     const def = ROOM_TYPES[type];
     for (const [resource, amt] of Object.entries(def.cost)) {
       if (res[resource] < amt) { addLog(`❌ Need ${amt} ${resource} for ${def.label}`); return; }
@@ -810,6 +991,10 @@ export default function Speranza() {
     setTick(0);
     setGameOver(null);
     setLog(["Colony restarted."]);
+    setMorale(50);
+    setUnlockedRows([0]);
+    setSurfaceHaul({ salvage: 0, arcTech: 0, schematics: [] });
+    setExcavations({});
   };
 
   // ── Derived UI ────────────────────────────────────────────────────────────
@@ -907,6 +1092,37 @@ export default function Speranza() {
             )}
           </div>
 
+          {/* Morale bar */}
+          {(() => {
+            const moraleColor = morale > 50 ? "#7ed321" : morale > 0 ? "#f5a623" : morale > -50 ? "#ff7744" : "#ff2222";
+            const moraleTier  = morale > 75 ? "THRIVING" : morale > 25 ? "STABLE" : morale > 0 ? "UNEASY" : morale > -50 ? "STRAINED" : morale > -75 ? "FRACTURED" : "COLLAPSE";
+            const moraleVal   = Math.floor(morale);
+            const positivePct = morale > 0 ? (morale / 100) * 50 : 0;
+            const negativePct = morale < 0 ? (Math.abs(morale) / 100) * 50 : 0;
+            return (
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, minWidth: 160 }}>
+                <div style={{ fontSize: 9, color: moraleColor, letterSpacing: 2, fontWeight: "bold" }}>
+                  🧭 MORALE: {moraleTier}
+                </div>
+                <div style={{ width: "100%", height: 10, background: "#0d1020", borderRadius: 5, overflow: "hidden", position: "relative" }}>
+                  {/* Center divider */}
+                  <div style={{ position: "absolute", left: "50%", top: 0, width: 1, height: "100%", background: "#2a3545", zIndex: 2 }} />
+                  {/* Positive half (right of center) */}
+                  {morale > 0 && (
+                    <div style={{ position: "absolute", left: "50%", top: 0, height: "100%", width: `${positivePct}%`, background: `linear-gradient(90deg, #3a7a1a, ${moraleColor})`, borderRadius: "0 4px 4px 0", transition: "width 0.5s" }} />
+                  )}
+                  {/* Negative half (left of center) */}
+                  {morale < 0 && (
+                    <div style={{ position: "absolute", right: "50%", top: 0, height: "100%", width: `${negativePct}%`, background: `linear-gradient(270deg, #7a2020, ${moraleColor})`, borderRadius: "4px 0 0 4px", transition: "width 0.5s" }} />
+                  )}
+                </div>
+                <div style={{ fontSize: 8, color: moraleColor, fontFamily: "monospace" }}>
+                  {moraleVal > 0 ? `+${moraleVal}` : moraleVal} / 100
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Colonists summary */}
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <div style={{ background: "#0a1520", border: "1px solid #1e3a5f", borderRadius: 6, padding: "5px 10px", textAlign: "center" }}>
@@ -938,6 +1154,15 @@ export default function Speranza() {
             </div>
           )}
         </div>
+        {/* Surface Haul */}
+        {(surfaceHaul.salvage > 0 || surfaceHaul.arcTech > 0 || surfaceHaul.schematics.length > 0) && (
+          <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 14, background: "#0a0c14", border: "1px solid #33334455", borderRadius: 6, padding: "5px 12px", fontSize: 9, color: "#8899aa", letterSpacing: 1 }}>
+            <span style={{ color: "#556", fontSize: 8 }}>SURFACE HAUL:</span>
+            {surfaceHaul.salvage > 0 && <span>🔩 SALVAGE: <strong style={{ color: "#c8a060" }}>{surfaceHaul.salvage}</strong></span>}
+            {surfaceHaul.arcTech > 0 && <span>⚙️ ARC TECH: <strong style={{ color: "#bb44ff" }}>{surfaceHaul.arcTech}</strong></span>}
+            {surfaceHaul.schematics.length > 0 && <span>📋 SCHEMATICS: <strong style={{ color: "#00e5ff" }}>{surfaceHaul.schematics.length}</strong></span>}
+          </div>
+        )}
       </div>
 
       {/* ── ACTIVE RAID / RAID WINDOW BANNER ── */}
@@ -1063,60 +1288,113 @@ export default function Speranza() {
           </div>
 
           <div style={{ border: "1px solid #1a2a3a", borderTop: "none", borderRadius: "0 0 6px 6px", overflow: "hidden", background: "#060810" }}>
-            {grid.map((row, r) => (
-              <div key={r} style={{ display: "flex" }}>
-                <div style={{ width: 28, background: "#07090f", borderRight: "1px solid #0d1020", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 8, color: "#1e3040", flexShrink: 0 }}>
-                  -{(r + 1) * 10}m
-                </div>
-                {row.map((cell, c) => {
-                  const def   = cell.type ? ROOM_TYPES[cell.type] : null;
-                  const isSel = selected?.r === r && selected?.c === c;
-                  return (
-                    <div key={c} onClick={() => handleCellClick(r, c)} style={{
-                      flex: 1, height: 78,
-                      border: isSel ? "2px solid #4ab3f4" : `1px solid ${def ? def.border + "33" : "#0d1020"}`,
-                      background: def ? def.bg : (r % 2 === 0 ? "#07090f" : "#060810"),
-                      cursor: "pointer",
-                      display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-                      position: "relative", transition: "border-color 0.1s",
-                      boxShadow: def ? `inset 0 0 18px ${def.color}0d` : "none",
+            {grid.map((row, r) => {
+              const isLocked = !unlockedRows.includes(r);
+              const excav    = excavations[r];
+              const depthLabel = `${(r + 1) * 10}m`;
+              return (
+                <div key={r} style={{ display: "flex" }}>
+                  <div style={{ width: 28, background: "#07090f", borderRight: "1px solid #0d1020", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 8, color: "#1e3040", flexShrink: 0 }}>
+                    -{depthLabel}
+                  </div>
+                  {isLocked ? (
+                    /* ── LOCKED ROW ── */
+                    <div style={{
+                      flex: 1, height: 78, background: "#040508",
+                      border: "1px solid #1a1a2a",
+                      display: "flex", alignItems: "center", justifyContent: "space-between",
+                      padding: "0 14px",
                     }}>
-                      {def ? (
-                        <>
-                          <div style={{ fontSize: 18 }}>{def.icon}</div>
-                          <div style={{ fontSize: 7, color: def.color, letterSpacing: 0.5, marginTop: 2, textAlign: "center" }}>
-                            {def.label.toUpperCase()}
+                      <div>
+                        <div style={{ color: "#334", fontSize: 10, letterSpacing: 1 }}>
+                          🔒 &nbsp;-{depthLabel} &nbsp;<span style={{ color: "#222" }}>SEALED — excavation required</span>
+                        </div>
+                        {excav && (
+                          <div style={{ marginTop: 5, display: "flex", alignItems: "center", gap: 8 }}>
+                            <div style={{ width: 140, height: 6, background: "#0d1020", borderRadius: 3, overflow: "hidden" }}>
+                              <div style={{
+                                height: "100%", borderRadius: 3,
+                                width: `${((excav.totalTicks - excav.ticksLeft) / excav.totalTicks) * 100}%`,
+                                background: "#a0522d", transition: "width 0.4s",
+                              }} />
+                            </div>
+                            <span style={{ color: "#a0522d", fontSize: 8 }}>⛏ {excav.ticksLeft}t</span>
                           </div>
-                          {def.cap > 0 && (
-                            <div style={{ display: "flex", gap: 3, marginTop: 4 }}>
-                              {[...Array(def.cap)].map((_, i) => (
-                                <div key={i} style={{
-                                  width: 7, height: 7, borderRadius: "50%",
-                                  background: i < cell.workers ? def.color : "#1a1a2e",
-                                  border: `1px solid ${def.color}55`,
-                                }} />
-                              ))}
-                            </div>
-                          )}
-                          {cell.damaged && (
-                            <div style={{
-                              position: "absolute", inset: 0, background: "#ff000018",
-                              border: "2px solid #ff4444", pointerEvents: "none",
-                              display: "flex", alignItems: "flex-start", justifyContent: "flex-end",
-                              padding: 3,
-                            }}>
-                              <span style={{ fontSize: 10 }}>⚠</span>
-                            </div>
-                          )}
-                        </>
-                      ) : (
-                        <div style={{ color: "#151e2a", fontSize: 16 }}>+</div>
-                      )}
+                        )}
+                      </div>
+                      {!excav && (() => {
+                        const prereqMet = unlockedRows.includes(r - 1);
+                        return (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleStartExcavation(r); }}
+                            disabled={!prereqMet}
+                            title={prereqMet ? `Excavate -${(r+1)*10}m for ${EXCAVATION_DEFS[r]?.scrap} scrap` : "Excavate the level above first"}
+                            style={{
+                              background: prereqMet ? "#0a0800" : "#060606",
+                              border: `1px solid ${prereqMet ? "#a0522d" : "#2a2020"}`,
+                              borderRadius: 4,
+                              color: prereqMet ? "#a0522d" : "#3a2020",
+                              padding: "5px 10px",
+                              cursor: prereqMet ? "pointer" : "not-allowed",
+                              fontSize: 9, letterSpacing: 1, fontFamily: "monospace",
+                            }}
+                          >{prereqMet ? `⛏ DIG (${EXCAVATION_DEFS[r]?.scrap ?? "?"}⚙)` : "🔒 DIG"}</button>
+                        );
+                      })()}
                     </div>
-                  );
-                })}
-              </div>
-            ))}
+                  ) : (
+                    /* ── UNLOCKED ROW — normal cell rendering ── */
+                    row.map((cell, c) => {
+                      const def   = cell.type ? ROOM_TYPES[cell.type] : null;
+                      const isSel = selected?.r === r && selected?.c === c;
+                      return (
+                        <div key={c} onClick={() => handleCellClick(r, c)} style={{
+                          flex: 1, height: 78,
+                          border: isSel ? "2px solid #4ab3f4" : `1px solid ${def ? def.border + "33" : "#0d1020"}`,
+                          background: def ? def.bg : (r % 2 === 0 ? "#07090f" : "#060810"),
+                          cursor: "pointer",
+                          display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+                          position: "relative", transition: "border-color 0.1s",
+                          boxShadow: def ? `inset 0 0 18px ${def.color}0d` : "none",
+                        }}>
+                          {def ? (
+                            <>
+                              <div style={{ fontSize: 18 }}>{def.icon}</div>
+                              <div style={{ fontSize: 7, color: def.color, letterSpacing: 0.5, marginTop: 2, textAlign: "center" }}>
+                                {def.label.toUpperCase()}
+                              </div>
+                              {def.cap > 0 && (
+                                <div style={{ display: "flex", gap: 3, marginTop: 4 }}>
+                                  {[...Array(def.cap)].map((_, i) => (
+                                    <div key={i} style={{
+                                      width: 7, height: 7, borderRadius: "50%",
+                                      background: i < cell.workers ? def.color : "#1a1a2e",
+                                      border: `1px solid ${def.color}55`,
+                                    }} />
+                                  ))}
+                                </div>
+                              )}
+                              {cell.damaged && (
+                                <div style={{
+                                  position: "absolute", inset: 0, background: "#ff000018",
+                                  border: "2px solid #ff4444", pointerEvents: "none",
+                                  display: "flex", alignItems: "flex-start", justifyContent: "flex-end",
+                                  padding: 3,
+                                }}>
+                                  <span style={{ fontSize: 10 }}>⚠</span>
+                                </div>
+                              )}
+                            </>
+                          ) : (
+                            <div style={{ color: "#151e2a", fontSize: 16 }}>+</div>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              );
+            })}
           </div>
 
           {/* ── Supply / Demand ── */}
