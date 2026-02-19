@@ -223,6 +223,38 @@ function applyMoraleModifier(table, moraleSnapshot) {
 const DRAIN_PER_COL = { food: 0.4, water: 0.4, energy: 0.2 };
 function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
 
+// ─── Pass 5: Row-Based Raid Targeting ────────────────────────────────────────
+// Row 0 = most exposed (-10m), Row 3 = deepest/safest (-40m)
+function weightedTargetPick(colonists, grid, sizeDef) {
+  const rowWeights = [4, 3, 2, 1];
+  const weighted = colonists.map(col => {
+    let rowIdx = 0;
+    if (col.status === "idle")        rowIdx = 0;
+    else if (col.status === "onSentry") rowIdx = 0;
+    else if (col.status === "excavating") rowIdx = 3;
+    else if (col.status === "working") {
+      // Approximate: find deepest occupied row (rooms with workers)
+      grid.forEach((row, r) => row.forEach(cell => {
+        if (cell.workers > 0) rowIdx = r;
+      }));
+    }
+    let weight = rowWeights[rowIdx] ?? 1;
+    if (col.traits?.includes("ghost")) weight *= 0.5; // GHOST: half as likely to be targeted
+    return { col, weight };
+  });
+  const targets = [];
+  const pool = [...weighted];
+  for (let i = 0; i < sizeDef.targets && pool.length > 0; i++) {
+    const total = pool.reduce((s, w) => s + w.weight, 0);
+    let rand = Math.random() * total;
+    for (let j = 0; j < pool.length; j++) {
+      rand -= pool[j].weight;
+      if (rand <= 0) { targets.push(pool[j].col); pool.splice(j, 1); break; }
+    }
+  }
+  return targets;
+}
+
 function makeGrid() {
   return Array.from({ length: GRID_ROWS }, (_, r) =>
     Array.from({ length: GRID_COLS }, (_, c) => ({ id: `${r}-${c}`, type: null, workers: 0, damaged: false }))
@@ -555,7 +587,7 @@ export default function Speranza() {
         if (newStrikeCD <= 0 && newTicksLeft > 0) {
           changeMoraleRef.current(-3, "raid strike landed");
           const atRisk = cols.filter(c => c.status === "working" || c.status === "onSentry" || c.status === "idle");
-          const targets = atRisk.slice(0, sizeDef.targets);
+          const targets = weightedTargetPick(atRisk, g, sizeDef); // Pass 5: row-weighted
           if (targets.length === 0) {
             addLog(`💢 ${sizeDef.icon} ARC STRIKE — no exposed workers. Colony holds!`);
             addToast(`💢 ${sizeDef.label} STRIKE\nNo workers exposed — held the line.`, "raid");
@@ -575,12 +607,19 @@ export default function Speranza() {
                 return ng;
               });
               const roll = Math.random();
+              // HARDENED: injury window shrinks from 30% to 20% (0.50–0.70 instead of 0.50–0.80)
+              const injureThreshold = target.traits?.includes("hardened") ? 0.70 : 0.80;
               if (roll < 0.50) {
-                setColonists(prev => prev.map(c => c.id === target.id ? { ...c, status: "idle" } : c));
-                addLog(`  → ${target.name} fled their post!`);
-                addToast(`💢 ${sizeDef.label} STRIKE\n${target.name} fled — shaken but alive.`, "raid");
-                changeMoraleRef.current(-5, "colonist fled");
-              } else if (roll < 0.80) {
+                // VETERAN: holds post — never flees
+                if (target.traits?.includes("veteran")) {
+                  addLog(`  → ${target.name} held their post — veteran resolve.`);
+                } else {
+                  setColonists(prev => prev.map(c => c.id === target.id ? { ...c, status: "idle" } : c));
+                  addLog(`  → ${target.name} fled their post!`);
+                  addToast(`💢 ${sizeDef.label} STRIKE\n${target.name} fled — shaken but alive.`, "raid");
+                  changeMoraleRef.current(-5, "colonist fled");
+                }
+              } else if (roll < injureThreshold) {
                 setColonists(prev => prev.map(c => c.id === target.id ? { ...c, status: "injured", injuryTicksLeft: INJURY_TICKS_BASE } : c));
                 addLog(`  → ${target.name} was INJURED!`);
                 addToast(`💢 ${sizeDef.label} STRIKE — CASUALTY\n${target.name} is injured.`, "injury");
@@ -598,12 +637,16 @@ export default function Speranza() {
           // Building damage chance per strike
           const dmgChance = { small: 0, medium: 0.10, large: 0.25 }[arNow.sizeKey] ?? 0;
           if (dmgChance > 0 && Math.random() < dmgChance) {
-            const undamaged = [];
+            // Pass 5: row-weighted building damage — row 0 (surface) 4× more likely than row 3
+            const weightedRooms = [];
             g.forEach((row, ri) => row.forEach((cell, ci) => {
-              if (cell.type && !cell.damaged) undamaged.push({ r: ri, c: ci, type: cell.type });
+              if (cell.type && !cell.damaged) {
+                const w = [4, 3, 2, 1][ri] ?? 1;
+                for (let i = 0; i < w; i++) weightedRooms.push({ r: ri, c: ci, type: cell.type });
+              }
             }));
-            if (undamaged.length > 0) {
-              const dmgTarget = undamaged[Math.floor(Math.random() * undamaged.length)];
+            if (weightedRooms.length > 0) {
+              const dmgTarget = weightedRooms[Math.floor(Math.random() * weightedRooms.length)];
               setGrid(prev => {
                 const ng = prev.map(row => row.map(c => ({ ...c })));
                 ng[dmgTarget.r][dmgTarget.c].damaged = true;
@@ -737,7 +780,9 @@ export default function Speranza() {
         let nurseCapacity = nursesAvailable * 3; // each nurse handles up to 3 patients
         return prev.map(col => {
           if (col.status !== "injured") return col;
-          const healRate = nurseCapacity > 0 ? (nurseCapacity--, HEAL_RATE_NURSE) : 1;
+          // IRON LUNGS: heals 2× faster
+          const baseHeal = nurseCapacity > 0 ? (nurseCapacity--, HEAL_RATE_NURSE) : 1;
+          const healRate = col.traits?.includes("ironLungs") ? baseHeal * 2 : baseHeal;
           const newTicks = (col.injuryTicksLeft ?? INJURY_TICKS_BASE) - healRate;
           if (newTicks <= 0) {
             addLog(`💊 ${col.name} has recovered and returned to duty.`);
