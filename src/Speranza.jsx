@@ -187,6 +187,38 @@ const EXPEDITION_TYPES = {
   },
 };
 
+// ─── Expedition Roll Tables ───────────────────────────────────────────────────
+function randBetween(a, b) { return Math.floor(Math.random() * (b - a + 1)) + a; }
+
+const EXPEDITION_ROLL_TABLES = {
+  scav: [
+    { id: "scrap_cache", weight: 35, type: "good",    label: "Found a scrap cache",         apply: () => ({ scrap: randBetween(15, 30) }) },
+    { id: "salvage",     weight: 25, type: "good",    label: "Recovered salvage",            apply: () => ({ salvage: randBetween(2, 4) }) },
+    { id: "survivor",    weight: 8,  type: "good",    label: "Encountered a survivor",       apply: () => ({ survivor: true }) },
+    { id: "nothing",     weight: 20, type: "neutral", label: "Nothing found — kept moving",  apply: () => ({}) },
+    { id: "injured",     weight: 8,  type: "bad",     label: "took a hit",                   apply: () => "injure" },
+    { id: "killed",      weight: 4,  type: "bad",     label: "was killed",                   apply: () => "kill" },
+  ],
+  strike: [
+    { id: "arc_tech",    weight: 30, type: "good",    label: "Salvaged Arc Tech components", apply: () => ({ arcTech: randBetween(1, 2) }) },
+    { id: "salvage",     weight: 25, type: "good",    label: "Recovered salvage haul",       apply: () => ({ salvage: randBetween(3, 6) }) },
+    { id: "schematic",   weight: 5,  type: "good",    label: "Found a schematic",            apply: () => ({ schematic: true }) },
+    { id: "ambush",      weight: 15, type: "neutral", label: "Ambushed — retreated empty",   apply: () => ({}) },
+    { id: "injured",     weight: 15, type: "bad",     label: "took a hit",                   apply: () => "injure" },
+    { id: "killed",      weight: 10, type: "bad",     label: "was killed",                   apply: () => "kill" },
+  ],
+};
+
+function applyMoraleModifier(table, moraleSnapshot) {
+  const modifier = moraleSnapshot > 75 ? 1.15 : moraleSnapshot > 25 ? 1.0 : moraleSnapshot > 0 ? 0.9 : 0.8;
+  return table.map(entry => ({
+    ...entry,
+    weight: entry.type === "good" ? entry.weight * modifier
+          : entry.type === "bad"  ? entry.weight / modifier
+          : entry.weight,
+  }));
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const DRAIN_PER_COL = { food: 0.4, water: 0.4, energy: 0.2 };
 function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
@@ -241,7 +273,8 @@ export default function Speranza() {
   const [res,        setRes]        = useState(INIT_RES);
   const [colonists,  setColonists]  = useState(initColonists); // array of colonist objects
   const [threat,     setThreat]     = useState(15);
-  const [expedition, setExpedition] = useState(null);
+  const [expeditions,  setExpeditions]  = useState([]);
+  const [expedDuration, setExpedDuration] = useState(40);
   const [selected,   setSelected]   = useState(null);
   const [buildMenu,  setBuildMenu]  = useState(false);
   const [netFlow,    setNetFlow]    = useState({ energy: 0, food: 0, water: 0, scrap: 0 });
@@ -287,7 +320,7 @@ export default function Speranza() {
   // ── Refs — tick loop reads these ──────────────────────────────────────────
   const gridRef           = useRef(grid);
   const colonistsRef      = useRef(colonists);
-  const expedRef          = useRef(expedition);
+  const expeditionsRef    = useRef(expeditions);
   const gameOverRef       = useRef(gameOver);
   const raidWindowRef     = useRef(raidWindow);
   const unlockedTechsRef  = useRef(unlockedTechs);
@@ -295,7 +328,7 @@ export default function Speranza() {
   const tickRef           = useRef(tick);
   useEffect(() => { gridRef.current          = grid;          }, [grid]);
   useEffect(() => { colonistsRef.current     = colonists;     }, [colonists]);
-  useEffect(() => { expedRef.current         = expedition;    }, [expedition]);
+  useEffect(() => { expeditionsRef.current   = expeditions;   }, [expeditions]);
   useEffect(() => { gameOverRef.current      = gameOver;      }, [gameOver]);
   useEffect(() => { raidWindowRef.current    = raidWindow;    }, [raidWindow]);
   useEffect(() => { unlockedTechsRef.current = unlockedTechs; }, [unlockedTechs]);
@@ -348,7 +381,6 @@ export default function Speranza() {
 
       const g    = gridRef.current;
       const cols = colonistsRef.current;
-      const exp  = expedRef.current;
       const totalCol = cols.length;
 
       // 0. Passive morale ────────────────────────────────────────────────────
@@ -603,41 +635,96 @@ export default function Speranza() {
         }
       }
 
-      // 3. Expedition countdown ──────────────────────────────────────────────
-      if (exp) {
-        if (exp.ticksLeft <= 1) {
-          const def    = EXPEDITION_TYPES[exp.type];
-          const failed = Math.random() < def.failChance;
-          const names  = exp.colonistIds.map(id => {
-            const c = cols.find(c => c.id === id);
-            return c ? c.name : "Unknown";
-          }).join(", ");
+      // 3. Expedition rolls ──────────────────────────────────────────────────
+      setExpeditions(prev => prev.map(exp => {
+        let updated = { ...exp, ticksLeft: exp.ticksLeft - 1, rollCountdown: exp.rollCountdown - 1 };
 
-          if (failed) {
-            addLog(`⚠ ${def.icon} ${names} — ${def.failMsg}`);
-            addToast(`${def.icon} EXPEDITION FAILED\n${names} — ${def.failMsg}`, "injury");
-            changeMoraleRef.current(-5, "mission failed");
-          } else {
-            const rewardStr = Object.entries(def.reward).map(([r, a]) => `+${a} ${r}`).join("  ");
-            addLog(`✅ ${def.icon} ${names} returned! ${Object.entries(def.reward).map(([r, a]) => `+${a} ${r}`).join(", ")}`);
-            addToast(`${def.icon} MISSION COMPLETE\n${names} returned safe.\n${rewardStr}`, "success");
-            setRes(prev => {
-              const next = { ...prev };
-              for (const [r, amt] of Object.entries(def.reward)) next[r] = clamp(next[r] + amt, 0, MAX_RES);
-              return next;
-            });
-            changeMoraleRef.current(8, "successful run");
+        if (updated.rollCountdown <= 0 && updated.ticksLeft > 0) {
+          const expColonists = colonistsRef.current.filter(c => exp.colonistIds.includes(c.id));
+          let table = [...EXPEDITION_ROLL_TABLES[exp.type]];
+          table = applyMoraleModifier(table, exp.moraleSnapshot);
+          expColonists.forEach(col => {
+            if (col.traits?.includes("scavenger") && exp.type === "scav") {
+              table = table.map(e => ({ ...e, weight: e.type === "good" ? e.weight * 1.15 : e.weight }));
+            }
+            if (col.traits?.includes("ghost")) {
+              table = table.map(e => ({ ...e, weight: e.type === "bad" ? e.weight * 0.9 : e.weight }));
+            }
+          });
+
+          const totalWeight = table.reduce((s, e) => s + e.weight, 0);
+          let rand = Math.random() * totalWeight;
+          let picked = table[table.length - 1];
+          for (const entry of table) { rand -= entry.weight; if (rand <= 0) { picked = entry; break; } }
+
+          const result = picked.apply(exp);
+          const tickLabel = `[T${tickRef.current}]`;
+
+          if (result === "injure" || result === "kill") {
+            const target = expColonists.length > 0 ? expColonists[Math.floor(Math.random() * expColonists.length)] : null;
+            if (target) {
+              if (result === "injure") {
+                setColonists(p => p.map(c => c.id === target.id ? { ...c, status: "injured", injuryTicksLeft: INJURY_TICKS_BASE } : c));
+                updated.eventLog = [...updated.eventLog, `${tickLabel} ${target.name} ${picked.label}.`];
+                changeMoraleRef.current(-10, "colonist injured on expedition");
+                playInjury();
+              } else {
+                setColonists(p => p.filter(c => c.id !== target.id));
+                updated.eventLog = [...updated.eventLog, `${tickLabel} ${target.name} ${picked.label}.`];
+                changeMoraleRef.current(-20, "colonist killed on expedition");
+                playKill();
+              }
+            }
+          } else if (typeof result === "object") {
+            const newLoot = { ...updated.lootAccumulated };
+            if (result.scrap)    { newLoot.scrap    = (newLoot.scrap    || 0) + result.scrap; }
+            if (result.salvage)  { newLoot.salvage  = (newLoot.salvage  || 0) + result.salvage; }
+            if (result.arcTech)  { newLoot.arcTech  = (newLoot.arcTech  || 0) + result.arcTech; }
+            if (result.survivor) { newLoot.survivor = true; }
+            if (result.schematic) {
+              const allSchematics = ["turretSchematics","empSchematics","fortSchematics","geoSchematics","researchSchematics"];
+              const owned = surfaceHaulRef.current.schematics;
+              const available = allSchematics.filter(s => !owned.includes(s));
+              if (available.length > 0) {
+                const found = available[Math.floor(Math.random() * available.length)];
+                newLoot.schematicFound = found;
+                updated.eventLog = [...updated.eventLog, `${tickLabel} 📋 SCHEMATIC FOUND — ${found}!`];
+                addToast(`📋 SCHEMATIC RECOVERED\n${found}\nCheck the build menu.`, "success");
+              }
+            }
+            updated.lootAccumulated = newLoot;
+            if (picked.type !== "neutral") {
+              updated.eventLog = [...updated.eventLog, `${tickLabel} ${picked.label}.`];
+            }
           }
-
-          // Return all expedition colonists to idle (injury system comes next)
-          setColonists(prev =>
-            prev.map(c => exp.colonistIds.includes(c.id) ? { ...c, status: "idle" } : c)
-          );
-          setExpedition(null);
-        } else {
-          setExpedition(prev => ({ ...prev, ticksLeft: prev.ticksLeft - 1 }));
+          updated.rollCountdown = exp.rollEvery;
         }
-      }
+
+        if (updated.ticksLeft <= 0) {
+          const loot = updated.lootAccumulated;
+          if (loot.scrap)   setRes(p => ({ ...p, scrap: clamp(p.scrap + loot.scrap, 0, MAX_RES) }));
+          if (loot.salvage || loot.arcTech || loot.schematicFound) {
+            setSurfaceHaul(p => ({
+              salvage:    p.salvage + (loot.salvage  || 0),
+              arcTech:    p.arcTech + (loot.arcTech  || 0),
+              schematics: loot.schematicFound ? [...p.schematics, loot.schematicFound] : p.schematics,
+            }));
+          }
+          if (loot.survivor) {
+            const newCol = makeColonist();
+            setColonists(p => [...p, newCol]);
+            addLog(`🧍 Surface survivor found — ${newCol.name} joined the colony!`);
+          }
+          setColonists(p => p.map(c => updated.colonistIds.includes(c.id) ? { ...c, status: "idle" } : c));
+          const hasGoodLoot = (loot.scrap || 0) > 0 || (loot.salvage || 0) > 0 || (loot.arcTech || 0) > 0;
+          addLog(`✅ Expedition returned. ${hasGoodLoot ? `+${loot.scrap || 0} scrap${loot.salvage ? ` · +${loot.salvage} salvage` : ""}${loot.arcTech ? ` · +${loot.arcTech} arcTech` : ""}` : "Empty-handed."}`);
+          addToast(`✅ EXPEDITION COMPLETE\n${hasGoodLoot ? "Resources recovered." : "They came back empty-handed."}`, hasGoodLoot ? "success" : "info");
+          changeMoraleRef.current(hasGoodLoot ? 8 : -5, hasGoodLoot ? "expedition success" : "expedition failed");
+          playSuccess();
+          return null;
+        }
+        return updated;
+      }).filter(Boolean));
 
       // 4. Heal injured colonists ───────────────────────────────────────────
       // Count available nurses in the hospital
@@ -939,22 +1026,34 @@ export default function Speranza() {
   };
 
   const handleLaunchExpedition = (type) => {
-    if (expedition) { addLog("⚠ Expedition already in progress"); return; }
+    if (expeditions.length >= 2) { addLog("⚠ Maximum 2 expeditions active at once"); return; }
     const def = EXPEDITION_TYPES[type];
     const idle = colonists.filter(c => c.status === "idle");
     if (idle.length < def.colonistsRequired) {
       addLog(`⚠ Need ${def.colonistsRequired} free colonist(s) — only ${idle.length} available`);
       return;
     }
-    // Pick the first N idle colonists
-    const picked = idle.slice(0, def.colonistsRequired);
-    const names  = picked.map(c => c.name).join(" & ");
+    const picked   = idle.slice(0, def.colonistsRequired);
+    const names    = picked.map(c => c.name).join(" & ");
+    const rollEvery = type === "scav" ? 8 : 6;
+    const newExp = {
+      id: `exp-${Date.now()}`,
+      type,
+      duration:        expedDuration,
+      ticksLeft:       expedDuration,
+      rollEvery,
+      rollCountdown:   rollEvery,
+      colonistIds:     picked.map(c => c.id),
+      eventLog:        [],
+      lootAccumulated: { scrap: 0, salvage: 0, arcTech: 0, survivor: false },
+      moraleSnapshot:  morale,
+    };
     setColonists(prev =>
       prev.map(c => picked.find(p => p.id === c.id) ? { ...c, status: "onExpedition" } : c)
     );
     setThreat(t => clamp(t + def.threatDelta, 0, THREAT_RAID_THRESHOLD));
-    setExpedition({ type, ticksLeft: def.duration, colonistIds: picked.map(c => c.id) });
-    addLog(`${def.icon} ${names} deployed on ${def.label}. Returns in ${def.duration} ticks.`);
+    setExpeditions(prev => [...prev, newExp]);
+    addLog(`${def.icon} ${names} deployed on ${def.label} (${expedDuration}t). ~${Math.floor(expedDuration / rollEvery)} rolls expected.`);
     playExpedition();
   };
 
@@ -982,7 +1081,8 @@ export default function Speranza() {
     setRes(INIT_RES);
     setColonists(initColonists());
     setThreat(15);
-    setExpedition(null);
+    setExpeditions([]);
+    setExpedDuration(40);
     setRaidWindow(null);
     setActiveRaid(null);
     setUnlockedTechs([]);
@@ -1609,48 +1709,86 @@ export default function Speranza() {
                     <div style={{ fontSize: 9, color: "#5a3a3a", border: "1px solid #3a1a1a", borderRadius: 4, padding: "6px 8px", textAlign: "center" }}>
                       Assign 1 armorer above to unlock expeditions
                     </div>
-                  ) : expedition ? (
-                    <div style={{ background: "#0d0008", border: "1px solid #ff444433", borderRadius: 6, padding: 8 }}>
-                      <div style={{ color: "#ff8888", fontSize: 9, letterSpacing: 1, marginBottom: 4 }}>EXPEDITION IN PROGRESS</div>
-                      <div style={{ fontSize: 13, marginBottom: 3 }}>
-                        {EXPEDITION_TYPES[expedition.type].icon} {EXPEDITION_TYPES[expedition.type].label}
-                      </div>
-                      <div style={{ fontSize: 8, color: "#888", marginBottom: 4 }}>
-                        {expedition.colonistIds.map(id => colonists.find(c => c.id === id)?.name ?? "?").join(", ")}
-                      </div>
-                      <div style={{ height: 6, background: "#0d1020", borderRadius: 3, overflow: "hidden" }}>
-                        <div style={{
-                          height: "100%", borderRadius: 3,
-                          width: `${(expedition.ticksLeft / EXPEDITION_TYPES[expedition.type].duration) * 100}%`,
-                          background: "#ff4444", transition: "width 0.4s",
-                        }} />
-                      </div>
-                      <div style={{ fontSize: 8, color: "#5a3a3a", marginTop: 3 }}>
-                        {expedition.ticksLeft} tick{expedition.ticksLeft !== 1 ? "s" : ""} remaining
-                      </div>
-                    </div>
                   ) : (
-                    <div>
-                      <div style={{ color: "#884444", fontSize: 9, letterSpacing: 1, marginBottom: 6 }}>LAUNCH EXPEDITION</div>
-                      {Object.entries(EXPEDITION_TYPES).map(([key, def]) => {
-                        const canSend = unassigned >= def.colonistsRequired;
+                    <>
+                      {/* Duration Picker */}
+                      <div style={{ marginBottom: 8 }}>
+                        <div style={{ color: "#884444", fontSize: 9, letterSpacing: 1, marginBottom: 4 }}>DURATION</div>
+                        <div style={{ display: "flex", gap: 4 }}>
+                          {[20, 40, 60, 80].map(d => (
+                            <button key={d} onClick={() => setExpedDuration(d)} style={{
+                              flex: 1, background: expedDuration === d ? "#2a0008" : "#0a0a0a",
+                              border: `1px solid ${expedDuration === d ? "#ff4444" : "#2a1a1a"}`,
+                              borderRadius: 3, color: expedDuration === d ? "#ff6666" : "#443344",
+                              padding: "3px 0", cursor: "pointer", fontSize: 8, fontFamily: "monospace",
+                            }}>{d}t</button>
+                          ))}
+                        </div>
+                        <div style={{ fontSize: 7, color: "#443333", marginTop: 3 }}>
+                          ~{Math.floor(expedDuration / 8)} scav · ~{Math.floor(expedDuration / 6)} strike rolls
+                        </div>
+                      </div>
+
+                      {/* Active expedition live panels */}
+                      {expeditions.map(exp => {
+                        const def = EXPEDITION_TYPES[exp.type];
+                        const names = exp.colonistIds.map(id => colonists.find(c => c.id === id)?.name ?? "?").join(" & ");
+                        const progressPct = ((exp.duration - exp.ticksLeft) / exp.duration) * 100;
+                        const lastEvents = exp.eventLog.slice(-3);
+                        const loot = exp.lootAccumulated;
+                        const lootStr = [
+                          loot.scrap   > 0 && `+${loot.scrap}⚙`,
+                          loot.salvage > 0 && `+${loot.salvage}🔩`,
+                          loot.arcTech > 0 && `+${loot.arcTech}⚙️`,
+                          loot.survivor && "🧍survivor",
+                        ].filter(Boolean).join(" · ");
                         return (
-                          <button key={key} onClick={() => handleLaunchExpedition(key)} disabled={!canSend} style={{
-                            display: "block", width: "100%", marginBottom: 6,
-                            background: canSend ? "#100008" : "#0a0a0a",
-                            border: `1px solid ${canSend ? def.color : "#1a1a1a"}`,
-                            borderRadius: 5, padding: "7px 8px",
-                            cursor: canSend ? "pointer" : "not-allowed", textAlign: "left",
-                          }}>
-                            <div style={{ fontSize: 11, color: canSend ? def.color : "#333" }}>{def.icon} {def.label}</div>
-                            <div style={{ fontSize: 7, color: canSend ? "#556" : "#222", marginTop: 2, lineHeight: 1.4 }}>{def.desc}</div>
-                            <div style={{ fontSize: 7, color: canSend ? "#883333" : "#222", marginTop: 3 }}>
-                              {def.colonistsRequired} colonist · {def.duration} ticks · threat +{def.threatDelta} · {Math.round(def.failChance * 100)}% fail
+                          <div key={exp.id} style={{ background: "#0d0008", border: "1px solid #ff444422", borderRadius: 6, padding: 7, marginBottom: 6 }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 3 }}>
+                              <div style={{ color: def.color, fontSize: 9, fontWeight: "bold" }}>{def.icon} {def.label}</div>
+                              <div style={{ color: "#5a3a3a", fontSize: 8, fontFamily: "monospace" }}>{exp.ticksLeft}t</div>
                             </div>
-                          </button>
+                            <div style={{ fontSize: 7, color: "#665555", marginBottom: 4 }}>👤 {names}</div>
+                            <div style={{ height: 4, background: "#0d1020", borderRadius: 2, overflow: "hidden", marginBottom: 4 }}>
+                              <div style={{ height: "100%", width: `${progressPct}%`, background: def.color, transition: "width 0.4s" }} />
+                            </div>
+                            {lastEvents.length > 0 && lastEvents.map((evt, i) => (
+                              <div key={i} style={{ fontSize: 7, color: "#664444", lineHeight: 1.5, fontFamily: "monospace" }}>{evt}</div>
+                            ))}
+                            {lootStr && <div style={{ marginTop: 3, fontSize: 7, color: "#556633" }}>🎒 {lootStr}</div>}
+                          </div>
                         );
                       })}
-                    </div>
+
+                      {/* Launch buttons */}
+                      {expeditions.length < 2 ? (
+                        <div>
+                          <div style={{ color: "#884444", fontSize: 9, letterSpacing: 1, marginBottom: 6 }}>LAUNCH EXPEDITION</div>
+                          {Object.entries(EXPEDITION_TYPES).map(([key, def]) => {
+                            const canSend = unassigned >= def.colonistsRequired;
+                            return (
+                              <button key={key} onClick={() => handleLaunchExpedition(key)} disabled={!canSend} style={{
+                                display: "block", width: "100%", marginBottom: 6,
+                                background: canSend ? "#100008" : "#0a0a0a",
+                                border: `1px solid ${canSend ? def.color : "#1a1a1a"}`,
+                                borderRadius: 5, padding: "7px 8px",
+                                cursor: canSend ? "pointer" : "not-allowed", textAlign: "left",
+                              }}>
+                                <div style={{ fontSize: 11, color: canSend ? def.color : "#333" }}>{def.icon} {def.label}</div>
+                                <div style={{ fontSize: 7, color: canSend ? "#556" : "#222", marginTop: 2, lineHeight: 1.4 }}>{def.desc}</div>
+                                <div style={{ fontSize: 7, color: canSend ? "#883333" : "#222", marginTop: 3 }}>
+                                  {def.colonistsRequired} colonist · {expedDuration}t · threat +{def.threatDelta}
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div style={{ fontSize: 8, color: "#5a3a3a", border: "1px solid #3a1a1a", borderRadius: 4, padding: "6px 8px", textAlign: "center" }}>
+                          Max 2 expeditions active
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               )}
