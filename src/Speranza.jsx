@@ -160,6 +160,31 @@ const ROOM_TYPES = {
     desc: "Boosts colony morale. Each cook generates +1.5 morale/tick. Requires food + energy.",
     special: "diningHall",
   },
+  // ─── T3 Buildings (schematic-gated) ───────────────────────────────────────
+  arcTurret: {
+    label: "Arc Turret",     icon: "🔫", color: "#ff6622", bg: "#1a0800", border: "#ff6622",
+    cost: { scrap: 60, salvage: 8, arcTech: 3 }, produces: {}, consumes: { energy: 2 }, cap: 0,
+    desc: "Automated defense. 30% chance per strike to eliminate 1 incoming Arc unit. Drains 2 energy/tick.",
+    special: "arcTurret", requiresSchematic: "turretSchematics",
+  },
+  empArray: {
+    label: "EMP Array",      icon: "⚡🔲", color: "#bb44ff", bg: "#10001a", border: "#bb44ff",
+    cost: { scrap: 80, salvage: 10, arcTech: 5 }, produces: {}, consumes: { energy: 3 }, cap: 1,
+    desc: "50% to reduce raid by 1 target. Delays next strike +3 ticks. Requires 1 operator.",
+    special: "empArray", requiresSchematic: "empSchematics",
+  },
+  blastDoors: {
+    label: "Blast Doors",    icon: "🛡", color: "#aaaaaa", bg: "#111114", border: "#aaaaaa",
+    cost: { scrap: 50, salvage: 6, arcTech: 2 }, produces: {}, consumes: {}, cap: 0,
+    desc: "Passive. 40% chance to absorb building damage targeting row 0 per strike.",
+    special: "blastDoors", requiresSchematic: "fortSchematics",
+  },
+  geothermal: {
+    label: "Geothermal Gen", icon: "🌋", color: "#ff8800", bg: "#1a0800", border: "#ff8800",
+    cost: { scrap: 70, salvage: 12, arcTech: 4 }, produces: { energy: 6 }, consumes: {}, cap: 0,
+    desc: "Passive +6 energy/tick. No workers needed. Unlocked by -40m excavation.",
+    special: "geothermal", requiresSchematic: "geoSchematics",
+  },
 };
 
 // ─── Excavation Definitions ───────────────────────────────────────────────────
@@ -439,7 +464,8 @@ export default function Speranza() {
         g.forEach(row => row.forEach(cell => {
           if (!cell.type || !cell.workers) return;
           const def = ROOM_TYPES[cell.type];
-          if (def.special === "barracks" || def.special === "armory" || def.special === "tavern" || def.special === "diningHall") return;
+          if (def.special === "barracks" || def.special === "armory" || def.special === "tavern" || def.special === "diningHall" ||
+              def.special === "arcTurret" || def.special === "empArray" || def.special === "blastDoors" || def.special === "geothermal") return;
           if (cell.damaged) return; // damaged rooms don't produce
 
           let canRun = true;
@@ -479,6 +505,22 @@ export default function Speranza() {
             next.energy = clamp(next.energy - 1 * cell.workers, 0, MAX_RES);
             flow.food   -= 2 * cell.workers;
             flow.energy -= 1 * cell.workers;
+          }
+        }));
+
+        // T3 Building energy costs + geothermal passive production (Pass 6)
+        g.forEach(row => row.forEach(cell => {
+          if (cell.type === "arcTurret" && !cell.damaged) {
+            next.energy = clamp(next.energy - 2, 0, MAX_RES);
+            flow.energy -= 2;
+          }
+          if (cell.type === "empArray" && cell.workers > 0 && !cell.damaged) {
+            next.energy = clamp(next.energy - 3 * cell.workers, 0, MAX_RES);
+            flow.energy -= 3 * cell.workers;
+          }
+          if (cell.type === "geothermal" && !cell.damaged) {
+            next.energy = clamp(next.energy + 6, 0, MAX_RES);
+            flow.energy += 6;
           }
         }));
 
@@ -583,11 +625,32 @@ export default function Speranza() {
         // Pre-strike tick sound (5 ticks before strike)
         if (newStrikeCD === 5) playTickAlarm();
 
+        // Track EMP strike delay bonus (Pass 6) — must be declared outside the if-block
+        let strikeDelayBonus = 0;
+
         // Strike fires this tick
         if (newStrikeCD <= 0 && newTicksLeft > 0) {
           changeMoraleRef.current(-3, "raid strike landed");
+          // T3 Defenses: Arc Turret + EMP Array (Pass 6)
+          let raidSizeReduction = 0;
+          g.forEach(row => row.forEach(cell => {
+            if (cell.type === "arcTurret" && !cell.damaged) {
+              if (Math.random() < 0.30) raidSizeReduction++;
+            }
+            if (cell.type === "empArray" && cell.workers > 0 && !cell.damaged) {
+              if (Math.random() < 0.50) {
+                raidSizeReduction++;
+                strikeDelayBonus += 3;
+              }
+            }
+          }));
+          if (raidSizeReduction > 0) {
+            addLog(`🔫 Defenses active — ${raidSizeReduction} Arc unit(s) eliminated!`);
+            addToast(`🔫 DEFENSES ACTIVE\n${raidSizeReduction} Arc unit(s) eliminated.`, "success");
+          }
+          const effectiveSizeDef = { ...sizeDef, targets: Math.max(1, sizeDef.targets - raidSizeReduction) };
           const atRisk = cols.filter(c => c.status === "working" || c.status === "onSentry" || c.status === "idle");
-          const targets = weightedTargetPick(atRisk, g, sizeDef); // Pass 5: row-weighted
+          const targets = weightedTargetPick(atRisk, g, effectiveSizeDef); // Pass 5+6: row-weighted + T3
           if (targets.length === 0) {
             addLog(`💢 ${sizeDef.icon} ARC STRIKE — no exposed workers. Colony holds!`);
             addToast(`💢 ${sizeDef.label} STRIKE\nNo workers exposed — held the line.`, "raid");
@@ -647,13 +710,19 @@ export default function Speranza() {
             }));
             if (weightedRooms.length > 0) {
               const dmgTarget = weightedRooms[Math.floor(Math.random() * weightedRooms.length)];
-              setGrid(prev => {
-                const ng = prev.map(row => row.map(c => ({ ...c })));
-                ng[dmgTarget.r][dmgTarget.c].damaged = true;
-                return ng;
-              });
-              addLog(`💥 ${ROOM_TYPES[dmgTarget.type].label} took structural damage!`);
-              addToast(`💥 STRUCTURAL DAMAGE\n${ROOM_TYPES[dmgTarget.type].label} damaged.\nRepair costs 20 scrap.`, "injury");
+              // Pass 6: Blast Doors — 40% chance to absorb damage targeting row 0
+              const hasBlastDoors = g.some(row => row.some(cell => cell.type === "blastDoors" && !cell.damaged));
+              if (dmgTarget.r === 0 && hasBlastDoors && Math.random() < 0.40) {
+                addLog(`🛡 Blast Doors absorbed structural damage on row 0!`);
+              } else {
+                setGrid(prev => {
+                  const ng = prev.map(row => row.map(c => ({ ...c })));
+                  ng[dmgTarget.r][dmgTarget.c].damaged = true;
+                  return ng;
+                });
+                addLog(`💥 ${ROOM_TYPES[dmgTarget.type].label} took structural damage!`);
+                addToast(`💥 STRUCTURAL DAMAGE\n${ROOM_TYPES[dmgTarget.type].label} damaged.\nRepair costs 20 scrap.`, "injury");
+              }
             }
           }
           setRaidFlash(true);
@@ -673,7 +742,7 @@ export default function Speranza() {
           setActiveRaid({
             ...arNow,
             ticksLeft: newTicksLeft,
-            strikeCountdown: newStrikeCD <= 0 ? sizeDef.strikeEvery : newStrikeCD,
+            strikeCountdown: (newStrikeCD <= 0 ? sizeDef.strikeEvery : newStrikeCD) + strikeDelayBonus,
           });
         }
       }
@@ -944,14 +1013,24 @@ export default function Speranza() {
     const { r, c } = selected;
     if (!unlockedRows.includes(r)) { addLog("⚠ This level is not excavated yet"); return; }
     const def = ROOM_TYPES[type];
+    // Check all costs — salvage/arcTech come from surfaceHaul
     for (const [resource, amt] of Object.entries(def.cost)) {
-      if (res[resource] < amt) { addLog(`❌ Need ${amt} ${resource} for ${def.label}`); return; }
+      if (resource === "salvage") { if (surfaceHaul.salvage < amt) { addLog(`❌ Need ${amt} salvage for ${def.label}`); return; } }
+      else if (resource === "arcTech") { if (surfaceHaul.arcTech < amt) { addLog(`❌ Need ${amt} Arc Tech for ${def.label}`); return; } }
+      else { if (res[resource] < amt) { addLog(`❌ Need ${amt} ${resource} for ${def.label}`); return; } }
     }
     setRes(prev => {
       const next = { ...prev };
-      for (const [resource, amt] of Object.entries(def.cost)) next[resource] -= amt;
+      for (const [resource, amt] of Object.entries(def.cost)) {
+        if (resource !== "salvage" && resource !== "arcTech") next[resource] -= amt;
+      }
       return next;
     });
+    const salvageCost = def.cost.salvage ?? 0;
+    const arcTechCost = def.cost.arcTech ?? 0;
+    if (salvageCost > 0 || arcTechCost > 0) {
+      setSurfaceHaul(prev => ({ ...prev, salvage: prev.salvage - salvageCost, arcTech: prev.arcTech - arcTechCost }));
+    }
     setGrid(prev => {
       const next = prev.map(row => row.map(c => ({ ...c })));
       next[r][c] = { id: `${r}-${c}`, type, workers: 0, damaged: false };
@@ -1687,8 +1766,13 @@ export default function Speranza() {
               <div style={{ color: "#4ab3f4", fontSize: 10, letterSpacing: 2, marginBottom: 8 }}>BUILD ROOM</div>
               {Object.entries(ROOM_TYPES).map(([key, def]) => {
                 if (def.requiresTech && !unlockedTechs.includes(def.requiresTech)) return null;
+                if (def.requiresSchematic && !surfaceHaul.schematics.includes(def.requiresSchematic)) return null;
                 const costStr   = Object.entries(def.cost).map(([r, a]) => `${a} ${r}`).join(", ");
-                const canAfford = Object.entries(def.cost).every(([r, a]) => res[r] >= a);
+                const canAfford = Object.entries(def.cost).every(([r, a]) => {
+                  if (r === "salvage") return surfaceHaul.salvage >= a;
+                  if (r === "arcTech") return surfaceHaul.arcTech >= a;
+                  return res[r] >= a;
+                });
                 return (
                   <button key={key} onClick={() => handleBuild(key)} disabled={!canAfford} style={{
                     display: "block", width: "100%", marginBottom: 5,
