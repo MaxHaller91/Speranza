@@ -324,6 +324,39 @@ const STATUS_LABEL = {
   excavating:    "EXCAVATING",
 };
 
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+function tickToDayHour(t) {
+  const day = Math.floor(t / 48) + 1;
+  const halfHours = t % 48;
+  const hour = String(Math.floor(halfHours / 2)).padStart(2, "0");
+  const min  = halfHours % 2 === 1 ? "30" : "00";
+  return `DAY ${day} · ${hour}:${min}`;
+}
+
+// ─── Milestone Definitions ────────────────────────────────────────────────────
+const MILESTONE_DEFS = [
+  { id: "firstRaidSurvived",   check: (s) => s.raidsRepelled >= 1,           title: "FIRST RAID REPELLED",       text: "They found you. You're still here. That won't be the last of them." },
+  { id: "firstDeath",          check: (s) => s.memorial.length >= 1,          title: "THE FIRST LOSS",             text: "We lost our first. It won't be the last. Remember them." },
+  { id: "firstExpedReturn",    check: (s) => s.expeditionsCompleted >= 1,     title: "FIRST EXPEDITION RETURNED",  text: "They came back. That's not always guaranteed." },
+  { id: "pop8",                check: (s) => s.colonists.length >= 8,         title: "EIGHT COLONISTS",            text: "Eight mouths. Eight reasons to keep the lights on." },
+  { id: "pop12",               check: (s) => s.colonists.length >= 12,        title: "TWELVE COLONISTS",           text: "A real colony now. With all the problems that come with it." },
+  { id: "day7",                check: (s) => s.tick >= 48 * 7,               title: "ONE WEEK UNDERGROUND",       text: "Seven days. The colony holds." },
+  { id: "day14",               check: (s) => s.tick >= 48 * 14,              title: "TWO WEEKS",                  text: "Fourteen days. Some colonies don't last this long." },
+  { id: "day30",               check: (s) => s.tick >= 48 * 30,              title: "ONE MONTH",                  text: "A month in the dark. Keep going." },
+  { id: "day60",               check: (s) => s.tick >= 48 * 60,              title: "TWO MONTHS",                 text: "Sixty days underground. The colony has outlasted most." },
+  { id: "moraleHigh",          check: (s) => s.morale >= 85,                  title: "COLONY MORALE: HIGH",        text: "Morale has never been higher. Don't waste it." },
+  { id: "moraleLow",           check: (s) => s.morale <= -50,                 title: "MORALE: FRACTURED",          text: "People are starting to ask what they're even fighting for." },
+  { id: "firstLargeRaid",      check: (s) => s.largeRaidsRepelled >= 1,       title: "LARGE RAID SURVIVED",        text: "A full Arc assault. We're still here." },
+];
+
+// Epitaph pools for memorial entries
+const EPITAPHS = {
+  raidKilled:       ["Held their post. Didn't make it.", "Was in the wrong room when the strike hit.", "Didn't run. That wasn't in them.", "Took the hit that was meant for someone else. Maybe.", "Died the way they lived — at their post."],
+  expeditionKilled: ["Went topside one too many times.", "The surface takes eventually. It took them.", "Knew the risk. Went anyway. That was them.", "Their last transmission was clear. Then it wasn't.", "Volunteered for the run. Nobody made them."],
+  raidFled:         ["Left during a raid. Nobody blames them. Not out loud.", "The fear got them in the end.", "Decided the odds weren't worth it."],
+  moraleDeath:      ["The colony couldn't hold them here anymore.", "Left when the lights went out in people's eyes.", "Walked into the tunnels. Didn't say goodbye."],
+};
+
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function Speranza() {
   const [grid,       setGrid]       = useState(initGrid);
@@ -360,6 +393,15 @@ export default function Speranza() {
   const [unlockedRows,  setUnlockedRows]  = useState([0]);
   const [surfaceHaul,   setSurfaceHaul]   = useState({ salvage: 0, arcTech: 0, schematics: [] });
   const [excavations,   setExcavations]   = useState({});
+  // Session A additions
+  const [memorial,           setMemorial]           = useState([]);
+  const [firedMilestones,    setFiredMilestones]    = useState([]);
+  const [milestoneToast,     setMilestoneToast]     = useState(null);
+  const [hoveredCell,        setHoveredCell]        = useState(null);
+  const [selectedColonist,   setSelectedColonist]   = useState(null);
+  const [raidsRepelled,      setRaidsRepelled]      = useState(0);
+  const [largeRaidsRepelled, setLargeRaidsRepelled] = useState(0);
+  const [expeditionsCompleted, setExpeditionsCompleted] = useState(0);
 
   // ── Derived ───────────────────────────────────────────────────────────────
   // These are computed from colonists array — no separate state needed
@@ -401,6 +443,17 @@ export default function Speranza() {
   useEffect(() => { unlockedRowsRef.current = unlockedRows; }, [unlockedRows]);
   useEffect(() => { surfaceHaulRef.current  = surfaceHaul;  }, [surfaceHaul]);
   useEffect(() => { excavationsRef.current  = excavations;  }, [excavations]);
+  // Session A refs
+  const memorialRef           = useRef(memorial);
+  const firedMilestonesRef    = useRef(firedMilestones);
+  const raidsRepelledRef      = useRef(raidsRepelled);
+  const largeRaidsRepelledRef = useRef(largeRaidsRepelled);
+  const expeditionsCompletedRef = useRef(expeditionsCompleted);
+  useEffect(() => { memorialRef.current             = memorial;            }, [memorial]);
+  useEffect(() => { firedMilestonesRef.current      = firedMilestones;     }, [firedMilestones]);
+  useEffect(() => { raidsRepelledRef.current        = raidsRepelled;       }, [raidsRepelled]);
+  useEffect(() => { largeRaidsRepelledRef.current   = largeRaidsRepelled;  }, [largeRaidsRepelled]);
+  useEffect(() => { expeditionsCompletedRef.current = expeditionsCompleted;}, [expeditionsCompleted]);
 
   // ── Audio: start music on first interaction ───────────────────────────────
   const handleFirstInteraction = useCallback(() => {
@@ -414,7 +467,7 @@ export default function Speranza() {
   }, []);
 
   const addLog = useCallback((msg) => {
-    setLog(prev => [`[T${tickRef.current}] ${msg}`, ...prev.slice(0, 29)]);
+    setLog(prev => [`[${tickToDayHour(tickRef.current)}] ${msg}`, ...prev.slice(0, 29)]);
   }, []);
 
   const addToast = useCallback((message, type = "info") => {
@@ -429,6 +482,44 @@ export default function Speranza() {
   }, []);
   const changeMoraleRef = useRef(changeMorale);
   useEffect(() => { changeMoraleRef.current = changeMorale; }, [changeMorale]);
+
+  // ── Memorial helper ───────────────────────────────────────────────────────
+  const addToMemorial = useCallback((colonist, cause, currentTick) => {
+    const pool = EPITAPHS[cause] ?? EPITAPHS.raidKilled;
+    const epitaph = pool[Math.floor(Math.random() * pool.length)];
+    const entry = {
+      id:        colonist.id,
+      name:      colonist.name,
+      level:     colonist.level ?? 0,
+      traits:    colonist.traits ?? [],
+      cause,
+      day:       Math.floor(currentTick / 48) + 1,
+      hour:      (() => {
+        const h = Math.floor((currentTick % 48) / 2);
+        const m = (currentTick % 2 === 1) ? "30" : "00";
+        return `${String(h).padStart(2,"0")}:${m}`;
+      })(),
+      epitaph,
+    };
+    setMemorial(prev => [entry, ...prev]);
+  }, []);
+  const addToMemorialRef = useRef(addToMemorial);
+  useEffect(() => { addToMemorialRef.current = addToMemorial; }, [addToMemorial]);
+
+  // ── Milestone checker ─────────────────────────────────────────────────────
+  const checkMilestones = useCallback((snap) => {
+    for (const m of MILESTONE_DEFS) {
+      if (firedMilestonesRef.current.includes(m.id)) continue;
+      if (m.check(snap)) {
+        setFiredMilestones(prev => [...prev, m.id]);
+        setMilestoneToast({ title: m.title, text: m.text });
+        changeMoraleRef.current(5, `milestone: ${m.title}`);
+        break; // one per tick
+      }
+    }
+  }, []);
+  const checkMilestonesRef = useRef(checkMilestones);
+  useEffect(() => { checkMilestonesRef.current = checkMilestones; }, [checkMilestones]);
 
   // ── Main tick ─────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -448,7 +539,7 @@ export default function Speranza() {
             moraleWorkers += cell.workers;
           }
         }));
-        const moraleDrain    = totalCol * 0.3;
+        const moraleDrain    = Math.max(0, totalCol - 7) * 0.3;
         const moraleGain     = moraleWorkers * 1.5;
         const netMoraleDelta = moraleGain - moraleDrain;
         setMorale(prev => clamp(prev + netMoraleDelta, -100, 100));
@@ -678,6 +769,7 @@ export default function Speranza() {
                   addLog(`  → ${target.name} held their post — veteran resolve.`);
                 } else {
                   setColonists(prev => prev.map(c => c.id === target.id ? { ...c, status: "idle" } : c));
+                  addToMemorialRef.current(target, "raidFled", tickRef.current);
                   addLog(`  → ${target.name} fled their post!`);
                   addToast(`💢 ${sizeDef.label} STRIKE\n${target.name} fled — shaken but alive.`, "raid");
                   changeMoraleRef.current(-5, "colonist fled");
@@ -690,6 +782,7 @@ export default function Speranza() {
                 changeMoraleRef.current(-10, "colonist injured in raid");
               } else {
                 setColonists(prev => prev.filter(c => c.id !== target.id));
+                addToMemorialRef.current(target, "raidKilled", tickRef.current);
                 addLog(`  → ${target.name} was KILLED.`);
                 addToast(`💢 ${sizeDef.label} STRIKE — KIA\n${target.name} did not make it.`, "raid");
                 playKill();
@@ -738,6 +831,18 @@ export default function Speranza() {
           addToast(`✅ RAID OVER\n${sizeDef.label} Arc forces withdrew.\nThreat level reset.`, "success");
           playSuccess();
           changeMoraleRef.current(8, "raid survived");
+          setRaidsRepelled(prev => { const n = prev + 1; raidsRepelledRef.current = n; return n; });
+          if (arNow.sizeKey === "large") setLargeRaidsRepelled(prev => { const n = prev + 1; largeRaidsRepelledRef.current = n; return n; });
+          // milestone check snapshot
+          checkMilestonesRef.current({
+            raidsRepelled: raidsRepelledRef.current,
+            largeRaidsRepelled: largeRaidsRepelledRef.current,
+            memorial: memorialRef.current,
+            expeditionsCompleted: expeditionsCompletedRef.current,
+            colonists: colonistsRef.current,
+            tick: tickRef.current,
+            morale: moraleRef.current,
+          });
         } else {
           setActiveRaid({
             ...arNow,
@@ -782,6 +887,7 @@ export default function Speranza() {
                 playInjury();
               } else {
                 setColonists(p => p.filter(c => c.id !== target.id));
+                addToMemorialRef.current(target, "expeditionKilled", tickRef.current);
                 updated.eventLog = [...updated.eventLog, `${tickLabel} ${target.name} ${picked.label}.`];
                 changeMoraleRef.current(-20, "colonist killed on expedition");
                 playKill();
@@ -832,6 +938,11 @@ export default function Speranza() {
           addLog(`✅ Expedition returned. ${hasGoodLoot ? `+${loot.scrap || 0} scrap${loot.salvage ? ` · +${loot.salvage} salvage` : ""}${loot.arcTech ? ` · +${loot.arcTech} arcTech` : ""}` : "Empty-handed."}`);
           addToast(`✅ EXPEDITION COMPLETE\n${hasGoodLoot ? "Resources recovered." : "They came back empty-handed."}`, hasGoodLoot ? "success" : "info");
           changeMoraleRef.current(hasGoodLoot ? 8 : -5, hasGoodLoot ? "expedition success" : "expedition failed");
+          setExpeditionsCompleted(prev => {
+            const next = prev + 1;
+            expeditionsCompletedRef.current = next;
+            return next;
+          });
           playSuccess();
           return null;
         }
@@ -959,7 +1070,20 @@ export default function Speranza() {
         }
       });
 
-      setTick(t => t + 1);
+      setTick(t => {
+        const next = t + 1;
+        // Check time/morale/population milestones each tick
+        checkMilestonesRef.current({
+          raidsRepelled: raidsRepelledRef.current,
+          largeRaidsRepelled: largeRaidsRepelledRef.current,
+          memorial: memorialRef.current,
+          expeditionsCompleted: expeditionsCompletedRef.current,
+          colonists: colonistsRef.current,
+          tick: next,
+          morale: moraleRef.current,
+        });
+        return next;
+      });
     }, TICK_MS / timescale);
 
     return () => clearInterval(interval);
@@ -981,6 +1105,13 @@ export default function Speranza() {
     if (cur.threat && !prevWarn.current.threat) { addLog("🚨 HIGH THREAT — Arc raid imminent!"); }
     prevWarn.current = cur;
   }, [tick]);
+
+  // ── Milestone toast auto-dismiss ─────────────────────────────────────────
+  useEffect(() => {
+    if (!milestoneToast) return;
+    const timer = setTimeout(() => setMilestoneToast(null), 5000);
+    return () => clearTimeout(timer);
+  }, [milestoneToast]);
 
   // ── Actions ───────────────────────────────────────────────────────────────
   const handleCellClick = (r, c) => {
@@ -1219,6 +1350,13 @@ export default function Speranza() {
     setUnlockedRows([0]);
     setSurfaceHaul({ salvage: 0, arcTech: 0, schematics: [] });
     setExcavations({});
+    setMemorial([]);
+    setFiredMilestones([]);
+    setMilestoneToast(null);
+    setSelectedColonist(null);
+    setRaidsRepelled(0);
+    setLargeRaidsRepelled(0);
+    setExpeditionsCompleted(0);
   };
 
   // ── Derived UI ────────────────────────────────────────────────────────────
@@ -1260,7 +1398,7 @@ export default function Speranza() {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", borderBottom: "1px solid #1e3a5f", paddingBottom: 8, marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
           <div>
             <div style={{ fontSize: 20, fontWeight: "bold", color: "#4ab3f4", letterSpacing: 3 }}>⛩ SPERANZA</div>
-            <div style={{ fontSize: 9, color: "#2a4a6a", letterSpacing: 2 }}>UNDERGROUND COLONY · TICK {tick}</div>
+            <div style={{ fontSize: 9, color: "#2a4a6a", letterSpacing: 2 }}>UNDERGROUND COLONY · {tickToDayHour(tick)}</div>
             {/* Timescale controls */}
             <div style={{ display: "flex", gap: 3, marginTop: 5, alignItems: "center" }}>
               {[{ v: 0, label: "⏸" }, { v: 0.5, label: ".5×" }, { v: 1, label: "1×" }, { v: 2, label: "2×" }, { v: 4, label: "4×" }, { v: 10, label: "10×" }].map(({ v, label }) => (
@@ -1572,7 +1710,10 @@ export default function Speranza() {
                       const def   = cell.type ? ROOM_TYPES[cell.type] : null;
                       const isSel = selected?.r === r && selected?.c === c;
                       return (
-                        <div key={c} onClick={() => handleCellClick(r, c)} style={{
+                        <div key={c} onClick={() => handleCellClick(r, c)}
+                          onMouseEnter={() => def && setHoveredCell({ r, c })}
+                          onMouseLeave={() => setHoveredCell(null)}
+                          style={{
                           flex: 1, height: 78,
                           border: isSel ? "2px solid #4ab3f4" : `1px solid ${def ? def.border + "33" : "#0d1020"}`,
                           background: def ? def.bg : (r % 2 === 0 ? "#07090f" : "#060810"),
@@ -1581,6 +1722,53 @@ export default function Speranza() {
                           position: "relative", transition: "border-color 0.1s",
                           boxShadow: def ? `inset 0 0 18px ${def.color}0d` : "none",
                         }}>
+                          {/* Hover tooltip */}
+                          {def && hoveredCell?.r === r && hoveredCell?.c === c && (
+                            <div style={{
+                              position: "absolute", bottom: "calc(100% + 4px)", left: "50%",
+                              transform: "translateX(-50%)",
+                              background: "#0d1020", border: `1px solid ${def.border}66`,
+                              borderRadius: 5, padding: "6px 10px", zIndex: 999,
+                              minWidth: 130, maxWidth: 180, pointerEvents: "none",
+                              boxShadow: `0 0 12px #00000088`,
+                            }}>
+                              <div style={{ color: def.color, fontSize: 9, fontWeight: "bold", marginBottom: 4 }}>
+                                {def.icon} {def.label}
+                              </div>
+                              {def.cap > 0 && (
+                                <div style={{ color: "#8899aa", fontSize: 8, marginBottom: 2 }}>
+                                  Workers: {grid[r][c].workers} / {def.cap}
+                                </div>
+                              )}
+                              {Object.entries(def.produces).length > 0 && (
+                                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                                  {Object.entries(def.produces).map(([res, amt]) => (
+                                    <span key={res} style={{ color: "#7ed321", fontSize: 8 }}>+{amt * grid[r][c].workers} {res}/t</span>
+                                  ))}
+                                </div>
+                              )}
+                              {Object.entries(def.consumes).length > 0 && (
+                                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                                  {Object.entries(def.consumes).map(([res, amt]) => (
+                                    <span key={res} style={{ color: "#ff7755", fontSize: 8 }}>-{amt * grid[r][c].workers} {res}/t</span>
+                                  ))}
+                                </div>
+                              )}
+                              {grid[r][c].damaged && (
+                                <div style={{ color: "#ff8800", fontSize: 8, marginTop: 3 }}>⚠ DAMAGED — repair: 20 scrap</div>
+                              )}
+                              {def.special === "hospital" && grid[r][c].workers > 0 && (
+                                <div style={{ color: "#ff6b9d", fontSize: 8, marginTop: 2 }}>
+                                  Treating up to {grid[r][c].workers * 3} patients
+                                </div>
+                              )}
+                              {def.special === "sentryPost" && (
+                                <div style={{ color: "#e8d44d", fontSize: 8, marginTop: 2 }}>
+                                  -{grid[r][c].workers * 5} threat/tick
+                                </div>
+                              )}
+                            </div>
+                          )}
                           {def ? (
                             <>
                               <div style={{ fontSize: 18 }}>{def.icon}</div>
@@ -1680,12 +1868,13 @@ export default function Speranza() {
                   const hasPending = col.pendingTraitPick;
                   const borderColor = hasPending ? "#f5a623" : STATUS_COLOR[col.status];
                   return (
-                    <div key={col.id} style={{
+                    <div key={col.id} onClick={() => setSelectedColonist(prev => prev === col.id ? null : col.id)} style={{
                       display: "flex", alignItems: "flex-start", gap: 6,
-                      background: hasPending ? "#1a1000" : "#0a0c14",
-                      border: `1px solid ${borderColor}${hasPending ? "" : "33"}`,
+                      background: hasPending ? "#1a1000" : selectedColonist === col.id ? "#0a1525" : "#0a0c14",
+                      border: `1px solid ${selectedColonist === col.id ? "#4ab3f4" : borderColor}${hasPending ? "" : selectedColonist === col.id ? "" : "33"}`,
                       borderRadius: 5, padding: "4px 8px", minWidth: 130,
-                      boxShadow: hasPending ? `0 0 8px #f5a62366` : "none",
+                      boxShadow: hasPending ? `0 0 8px #f5a62366` : selectedColonist === col.id ? "0 0 6px #4ab3f444" : "none",
+                      cursor: "pointer",
                     }}>
                       <div style={{
                         width: 7, height: 7, borderRadius: "50%", flexShrink: 0, marginTop: 3,
@@ -1759,6 +1948,61 @@ export default function Speranza() {
 
         {/* ── SIDE PANEL ── */}
         <div style={{ width: 205, display: "flex", flexDirection: "column", gap: 8, flexShrink: 0 }}>
+
+          {/* Colonist Detail Window */}
+          {selectedColonist && (() => {
+            const col = colonists.find(c => c.id === selectedColonist);
+            if (!col) return null;
+            const xpInLevel = (col.xp ?? 0) % 20;
+            const statusColor = STATUS_COLOR[col.status] ?? "#888";
+            return (
+              <div style={{ background: "#080b14", border: "1px solid #1a2a3a", borderRadius: 8, padding: 10 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <div style={{ width: 8, height: 8, borderRadius: "50%", background: statusColor, boxShadow: `0 0 5px ${statusColor}`, flexShrink: 0 }} />
+                    <div style={{ color: "#c8d0d8", fontSize: 11, fontWeight: "bold", letterSpacing: 1 }}>{col.name}</div>
+                    {(col.level ?? 0) > 0 && (
+                      <div style={{ color: col.level >= 3 ? "#ffd700" : "#aaaaaa", fontSize: 7, background: col.level >= 3 ? "#1a1400" : "#111", border: `1px solid ${col.level >= 3 ? "#ffd70044" : "#33333344"}`, borderRadius: 3, padding: "1px 4px" }}>LVL {col.level}</div>
+                    )}
+                  </div>
+                  <button onClick={() => setSelectedColonist(null)} style={{ background: "none", border: "1px solid #1a2535", borderRadius: 3, color: "#445", padding: "1px 5px", cursor: "pointer", fontSize: 10 }}>✕</button>
+                </div>
+                <div style={{ color: statusColor, fontSize: 8, letterSpacing: 1, marginBottom: 8 }}>
+                  {STATUS_LABEL[col.status]}{col.status === "injured" && col.injuryTicksLeft > 0 ? ` — ${col.injuryTicksLeft}t to recover` : ""}
+                </div>
+                <div style={{ marginBottom: 8 }}>
+                  <div style={{ color: "#2a4a6a", fontSize: 7, letterSpacing: 1, marginBottom: 3 }}>EXPERIENCE — LVL {col.level ?? 0}</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <div style={{ flex: 1, height: 5, background: "#1a1a2e", borderRadius: 3, overflow: "hidden" }}>
+                      <div style={{ height: "100%", width: `${(xpInLevel / 20) * 100}%`, background: "#2a5a8a", borderRadius: 3, transition: "width 0.4s" }} />
+                    </div>
+                    <div style={{ color: "#2a4a6a", fontSize: 7, fontFamily: "monospace" }}>{xpInLevel}/20</div>
+                  </div>
+                </div>
+                {col.traits && col.traits.length > 0 && (
+                  <div style={{ marginBottom: 8 }}>
+                    <div style={{ color: "#2a4a6a", fontSize: 7, letterSpacing: 1, marginBottom: 4 }}>TRAITS</div>
+                    <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                      {col.traits.map(t => (
+                        <div key={t} title={TRAITS[t]?.desc} style={{ fontSize: 8, background: "#0a0a14", border: `1px solid ${TRAITS[t]?.color ?? "#333"}44`, borderRadius: 3, padding: "1px 5px", color: TRAITS[t]?.color ?? "#888" }}>
+                          {TRAITS[t]?.icon} {TRAITS[t]?.label}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <div>
+                  <div style={{ color: "#2a4a6a", fontSize: 7, letterSpacing: 1, marginBottom: 4 }}>SERVICE RECORD</div>
+                  {[["Duty ticks", col.dutyTicks ?? 0], ["Times injured", col.injuryCount ?? 0]].map(([label, val]) => (
+                    <div key={label} style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
+                      <span style={{ color: "#445", fontSize: 8 }}>{label}</span>
+                      <span style={{ color: "#7a9aaa", fontSize: 8, fontFamily: "monospace" }}>{val}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Build menu */}
           {buildMenu && selCell && !selCell.type && (
@@ -2058,22 +2302,37 @@ export default function Speranza() {
             </div>
           )}
 
-          {/* Default: legend */}
+          {/* Default: memorial wall or hint */}
           {!selected && (
             <div style={{ background: "#080b14", border: "1px solid #1a2030", borderRadius: 8, padding: 10 }}>
-              <div style={{ color: "#4ab3f4", fontSize: 9, letterSpacing: 2, marginBottom: 8 }}>ROOM TYPES</div>
-              {Object.entries(ROOM_TYPES).map(([, def]) => (
-                <div key={def.label} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
-                  <span style={{ fontSize: 11 }}>{def.icon}</span>
-                  <div>
-                    <div style={{ color: def.color, fontSize: 9 }}>{def.label}</div>
-                    <div style={{ color: "#334", fontSize: 7 }}>
-                      {def.special === "armory" ? "launches expeditions" :
-                       Object.entries(def.produces).map(([r, a]) => `+${a} ${r}`).join(" ")}
-                    </div>
+              {memorial.length > 0 ? (
+                <>
+                  <div style={{ color: "#7a6a4a", fontSize: 9, letterSpacing: 2, marginBottom: 8, borderBottom: "1px solid #2a1a0a", paddingBottom: 6 }}>
+                    🕯 MEMORIAL
                   </div>
+                  <div style={{ maxHeight: 200, overflowY: "auto" }}>
+                    {memorial.map((entry, i) => (
+                      <div key={entry.id ?? i} style={{ marginBottom: 10, paddingBottom: 8, borderBottom: i < memorial.length - 1 ? "1px solid #1a1a2a" : "none" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
+                          <span style={{ color: "#c8d0d8", fontSize: 9, fontWeight: "bold" }}>{entry.name}</span>
+                          <span style={{ color: "#555", fontSize: 7 }}>LVL {entry.level}</span>
+                        </div>
+                        <div style={{ color: "#c87a30", fontSize: 7, letterSpacing: 0.5, marginBottom: 3 }}>
+                          {entry.cause === "raidKilled"       ? "Killed in raid"      :
+                           entry.cause === "expeditionKilled" ? "Killed on expedition":
+                           entry.cause === "raidFled"         ? "Fled during raid"    : "Left the colony"}
+                          {" — "}DAY {entry.day} · {entry.hour}
+                        </div>
+                        <div style={{ color: "#445", fontSize: 7, fontStyle: "italic", lineHeight: 1.5 }}>{entry.epitaph}</div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <div style={{ color: "#2a3a4a", fontSize: 9, textAlign: "center", padding: "10px 0", letterSpacing: 1 }}>
+                  Select a cell to build or manage a room
                 </div>
-              ))}
+              )}
             </div>
           )}
 
@@ -2094,6 +2353,25 @@ export default function Speranza() {
       <div style={{ maxWidth: 920, width: "100%", marginTop: 6, fontSize: 8, color: "#1a2535", letterSpacing: 1, textAlign: "center" }}>
         BUILD ARMORY + ASSIGN ARMORER → LAUNCH EXPEDITIONS · HIGH THREAT = ARC RAIDS · WORKSHOP IS YOUR LIFELINE
       </div>
+
+      {/* ── MILESTONE TOAST ── */}
+      {milestoneToast && (
+        <div style={{
+          position: "fixed", top: 80, left: "50%", transform: "translateX(-50%)",
+          background: "#0d0f00", border: "2px solid #ffd700",
+          borderRadius: 8, padding: "14px 22px",
+          minWidth: 260, maxWidth: 360,
+          boxShadow: "0 0 30px #ffd70066",
+          zIndex: 1001, pointerEvents: "none",
+          animation: "toastIn 0.2s ease-out",
+          textAlign: "center",
+        }}>
+          <div style={{ color: "#ffd700", fontSize: 11, fontWeight: "bold", letterSpacing: 2, marginBottom: 5 }}>
+            ★ {milestoneToast.title}
+          </div>
+          <div style={{ color: "#c8c0a0", fontSize: 9, lineHeight: 1.6 }}>{milestoneToast.text}</div>
+        </div>
+      )}
 
       {/* ── TOAST NOTIFICATIONS ── */}
       <div style={{
