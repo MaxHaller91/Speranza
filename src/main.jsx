@@ -7,3 +7,11 @@ createRoot(document.getElementById("root")).render(
     <Speranza />
   </StrictMode>
 );
+
+const loadingEl = document.getElementById("app-loading");
+if (loadingEl) {
+  window.setTimeout(() => {
+    loadingEl.classList.add("is-hidden");
+    window.setTimeout(() => loadingEl.remove(), 400);
+  }, 150);
+}

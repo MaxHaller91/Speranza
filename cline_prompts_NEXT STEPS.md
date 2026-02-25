@@ -2,6 +2,12 @@
 SESSION A — UI & FEEL
 ================================================================================
 
+PROJECT NOTE (MVP DECISION — 2026-02-22)
+- Session B is treated as complete for current direction, with intentional gameplay feel deviations from the original prompt.
+- Keep current implemented heat behavior and overall balancing unless explicitly requested otherwise.
+- Explicitly skipped by design for now: SCANNING scout interception flow, TARGETED +1 attacker requirement, MARKED 20-tick chain-raid hook, and HUNTED commander hook in Session B.
+- Priority bug fix retained: removed stale `setToastPaused(...)` usage causing runtime crash/black-screen on toast close.
+
 You are working on a React colony management game called Speranza. It is a Vite
 project using ES modules.
 

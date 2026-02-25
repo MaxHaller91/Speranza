@@ -7,9 +7,52 @@
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
       body { background: #050508; }
+
+      #app-loading {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        background: radial-gradient(ellipse at 50% 0%, #0d1520 0%, #050508 60%);
+        color: #4ab3f4;
+        font-family: "Courier New", monospace;
+        letter-spacing: 2px;
+        transition: opacity 0.35s ease;
+      }
+
+      #app-loading.is-hidden {
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      #app-loading .spinner {
+        width: 34px;
+        height: 34px;
+        border-radius: 50%;
+        border: 3px solid #1e3a5f;
+        border-top-color: #4ab3f4;
+        animation: spin 0.8s linear infinite;
+      }
+
+      #app-loading .label {
+        font-size: 12px;
+        text-transform: uppercase;
+      }
+
+      @keyframes spin {
+        to { transform: rotate(360deg); }
+      }
     </style>
   </head>
   <body>
+    <div id="app-loading" role="status" aria-live="polite">
+      <div class="spinner" aria-hidden="true"></div>
+      <div class="label">Initializing Speranza…</div>
+    </div>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>

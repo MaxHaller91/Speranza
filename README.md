@@ -8,6 +8,20 @@ A browser-based colony survival game set in the Arc Raiders universe. Manage res
 
 ---
 
+## Current Build Notes (Testing Branch)
+
+The latest testing build includes several systems that go beyond the original ARC THREAT model:
+
+- **☢ ARC HEAT system** now drives raid pressure (instead of the older single threat framing)
+- **Dynamic surface conditions** that can modify threat/production behavior and expedition availability
+- **Narrative milestones + dilemmas** that trigger run events and branch outcomes
+- Expanded **toast/alert + history log** feedback for major colony events
+- Updated **audio layer** (music controls + many new SFX cues)
+
+If something below still references “threat,” treat that as **ARC HEAT pressure** in the current testing version.
+
+---
+
 ## Getting Started
 
 When you load the game you'll have:
@@ -18,7 +32,7 @@ When you load the game you'll have:
 Your immediate goals:
 1. Build a **Water Recycler** and a **Hydroponics** bay to stop your food and water from draining
 2. Assign your idle colonist to one of these rooms
-3. Keep an eye on the **ARC THREAT** meter and the **MORALE** bar at the top
+3. Keep an eye on the **ARC HEAT** meter and the **MORALE** bar at the top
 
 ---
 
@@ -155,7 +169,7 @@ When a colonist levels up, choose one of five permanent traits:
 
 ## Arc Raids
 
-The **ARC THREAT** meter fills every tick. A larger colony fills it faster. Sentries slow it down. When it hits 100%, a **raid window** opens.
+The **ARC HEAT** meter rises as your colony grows and operates. A larger/active colony builds heat faster, while sentries suppress it. As heat escalates, raid pressure increases and incoming events become more dangerous.
 
 ### Raid Window — Incoming
 Each tick there's a **60% chance** the raid launches. If it doesn't, the raid **escalates** — Small grows to Medium, Medium to Large.

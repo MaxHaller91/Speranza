@@ -1,55 +1,18 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
-  startMusic, setMusicVolume, getMusicVolume,
+  startMusic, setMuted, getMuted,
   playBuild, playRaid, playInjury, playKill,
   playSuccess, playAlert, playExpedition,
-  playUiClick, playLevelUp, playRaidOver,
-  playAssign, playUnassign, playMilestone,
-  playDilemma, playDilemmaResolve,
-  playDemolish, playRepair, playRecruit,
-  playShelterAlarm, playSurfaceCondition,
-  playStructuralDamage, playBarricadesHold,
-  playTurret, playEMP,
   duckMusic, unduckMusic, playTickAlarm,
 } from "./sounds.js";
-import {
-  BACKSTORIES, QUIRKS, SURFACE_CONDITIONS,
-  DILEMMA_EVENTS, EXPEDITION_FLAVOR,
-  SURFACE_LOCATIONS, ARTIFACT_TEMPLATES, ARTIFACT_ITEMS,
-  COMMANDER_NAMES, COMMANDER_WEAKNESSES, COMMANDER_STRENGTHS,
-  TRADERS, DIRECTIVES,
-  MILESTONES, EPITAPHS,
-} from "../speranza-lore.js";
-import powerCellSprite from "./Assets/Buildings/Power Cell.png";
-import waterPumpSprite from "./Assets/Buildings/Water Pump.png";
-import hydroponicsSprite from "./Assets/Buildings/Hydroponics.png";
-import barracksSprite from "./Assets/Buildings/Barracks.png";
-import armorySprite from "./Assets/Buildings/Armory.png";
-import hospitalSprite from "./Assets/Buildings/Hospital.png";
-import earthTexture from "./Assets/Buildings/Earth Texture.png";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const GRID_COLS = 7;
 const GRID_ROWS = 4;
 const TICK_MS = 4000;
 const MAX_RES = 300;
-// ─── Heat System (replaces flat threat) ───────────────────────────────────────
-const HEAT_MAX              = 1000;
-const HEAT_BASE_GAIN        = 0.6;   // per tick baseline
-const HEAT_GAIN_PER_ROOM    = 0.35;  // per built room per tick
-const HEAT_DECAY_PER_TICK   = 0.3;   // passive decay per tick
-const HEAT_RAID_GAIN        = 15;    // heat added when a raid starts
-const HEAT_SENTRY_REDUCTION = 5;     // heat reduced per sentry per tick
-const HEAT_RAID_PROB_BASE   = 0.15;  // 15% base chance per day
-const HEAT_RAID_PROB_SCALE  = 0.25;  // up to +25% at max heat (total 40%/day)
-const HEAT_STATES = [
-  { min: 0,   max: 199,  label: "UNDETECTED", color: "#7ed321" },
-  { min: 200, max: 399,  label: "SCANNING",   color: "#ffcc00" },
-  { min: 400, max: 599,  label: "TARGETED",   color: "#ff8800" },
-  { min: 600, max: 799,  label: "HUNTED",     color: "#ff4444" },
-  { min: 800, max: 1000, label: "MARKED",     color: "#ff0000" },
-];
-const getHeatState = (h) => HEAT_STATES.find(s => h >= s.min && h <= s.max) ?? HEAT_STATES[0];
+const THREAT_PER_TICK = 1.2;
+const THREAT_RAID_THRESHOLD = 500;
 const INJURY_TICKS_BASE = 40;   // ticks to heal without a nurse
 const HEAL_RATE_NURSE   = 4;    // ticks removed per tick with a nurse (1 nurse heals up to 3 patients)
 
@@ -115,37 +78,25 @@ function nextName() {
 // (injured comes next pass)
 const COLONIST_BASE = () => ({
   xp: 0, level: 0, traits: [], dutyTicks: 0, ticksAlive: 0, pendingTraitPick: false,
-  joinTick: 0, expeditionsCompleted: 0, raidsSurvived: 0,
 });
-function makeColonist(joinTick = 0) {
-  const quirk = QUIRKS[Math.floor(Math.random() * QUIRKS.length)];
-  const backstory = BACKSTORIES[Math.floor(Math.random() * BACKSTORIES.length)];
-  return {
-    id: `c${Date.now()}-${Math.random()}`,
-    name: nextName(),
-    status: "idle",
-    backstory,
-    quirk,
-    injuryCount: 0,
-    joinTick,
-    ...COLONIST_BASE(),
-  };
+function makeColonist() {
+  return { id: `c${Date.now()}-${Math.random()}`, name: nextName(), status: "idle", ...COLONIST_BASE() };
 }
 
 // ─── Room Definitions ─────────────────────────────────────────────────────────
 const ROOM_TYPES = {
   power: {
-    label: "Power Cell",     icon: "⚡", sprite: powerCellSprite, color: "#f5a623", bg: "#1a1200", border: "#f5a623",
+    label: "Power Cell",     icon: "⚡", color: "#f5a623", bg: "#1a1200", border: "#f5a623",
     cost: { scrap: 10 },    produces: { energy: 4 }, consumes: {}, cap: 2,
     desc: "Generates energy to power the colony",
   },
   water: {
-    label: "Water Recycler", icon: "💧", sprite: waterPumpSprite, color: "#4a90e2", bg: "#00101f", border: "#4a90e2",
+    label: "Water Recycler", icon: "💧", color: "#4a90e2", bg: "#00101f", border: "#4a90e2",
     cost: { scrap: 15 },    produces: { water: 3 }, consumes: { energy: 1 }, cap: 2,
     desc: "Recycles water, needs energy",
   },
   hydro: {
-    label: "Hydroponics",    icon: "🌱", sprite: hydroponicsSprite, color: "#7ed321", bg: "#0a1a00", border: "#7ed321",
+    label: "Hydroponics",    icon: "🌱", color: "#7ed321", bg: "#0a1a00", border: "#7ed321",
     cost: { scrap: 20 },    produces: { food: 2 }, consumes: { energy: 1, water: 1 }, cap: 2,
     desc: "Grows food, needs energy + water",
   },
@@ -155,20 +106,20 @@ const ROOM_TYPES = {
     desc: "Makes scrap for construction",
   },
   barracks: {
-    label: "Barracks",       icon: "🛏", sprite: barracksSprite, color: "#e0b84a", bg: "#1a1200", border: "#e0b84a",
+    label: "Barracks",       icon: "🛏", color: "#e0b84a", bg: "#1a1200", border: "#e0b84a",
     cost: { scrap: 25 },    produces: {}, consumes: {}, cap: 0,
     popBonus: 2,
     desc: "Houses colonists (+2 pop cap)",
     special: "barracks",
   },
   armory: {
-    label: "Armory",         icon: "⚔️", sprite: armorySprite, color: "#ff4444", bg: "#1a0000", border: "#ff4444",
-    cost: { scrap: 40 },    produces: {}, consumes: { energy: 1 }, cap: 5,
+    label: "Armory",         icon: "⚔️", color: "#ff4444", bg: "#1a0000", border: "#ff4444",
+    cost: { scrap: 40 },    produces: {}, consumes: { energy: 1 }, cap: 1,
     desc: "Enables surface expeditions. Needs 1 armorer assigned.",
     special: "armory",
   },
   hospital: {
-    label: "Hospital",       icon: "🏥", sprite: hospitalSprite, color: "#ff6b9d", bg: "#1a0010", border: "#ff6b9d",
+    label: "Hospital",       icon: "🏥", color: "#ff6b9d", bg: "#1a0010", border: "#ff6b9d",
     cost: { scrap: 35 },    produces: {}, consumes: { energy: 1 }, cap: 2,
     desc: "Heals injured colonists. 1 nurse treats up to 3 patients. Without nurses, healing is 4× slower.",
     special: "hospital",
@@ -234,12 +185,6 @@ const ROOM_TYPES = {
     desc: "Passive +6 energy/tick. No workers needed. Unlocked by -40m excavation.",
     special: "geothermal", requiresSchematic: "geoSchematics",
   },
-  memorial: {
-    label: "Memorial Hall", icon: "🕯", color: "#9988bb", bg: "#0a0814", border: "#9988bb",
-    cost: { scrap: 30 },  produces: {}, consumes: {}, cap: 0,
-    desc: "A place to grieve. Death morale penalty −40%. Raid morale loss −2/strike.",
-    special: "memorial",
-  },
 };
 
 // ─── Excavation Definitions ───────────────────────────────────────────────────
@@ -302,7 +247,6 @@ function applyMoraleModifier(table, moraleSnapshot) {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const DRAIN_PER_COL = { food: 0.4, water: 0.4, energy: 0.2 };
 function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
-const EMPTY_STAT_BREAKDOWN = { plus: [], minus: [], net: 0 };
 
 // ─── Pass 5: Row-Based Raid Targeting ────────────────────────────────────────
 // Row 0 = most exposed (-10m), Row 3 = deepest/safest (-40m)
@@ -345,9 +289,9 @@ function makeGrid() {
 function initColonists() {
   nameIdx = 0;
   return [
-    { id: "c0", name: nextName(), status: "working", backstory: BACKSTORIES[0], quirk: QUIRKS[0], injuryCount: 0, ...COLONIST_BASE() },
-    { id: "c1", name: nextName(), status: "working", backstory: BACKSTORIES[1], quirk: QUIRKS[1], injuryCount: 0, ...COLONIST_BASE() },
-    { id: "c2", name: nextName(), status: "idle",    backstory: BACKSTORIES[2], quirk: QUIRKS[2], injuryCount: 0, ...COLONIST_BASE() },
+    { id: "c0", name: nextName(), status: "working", ...COLONIST_BASE() },
+    { id: "c1", name: nextName(), status: "working", ...COLONIST_BASE() },
+    { id: "c2", name: nextName(), status: "idle",    ...COLONIST_BASE() },
   ];
 }
 
@@ -389,42 +333,40 @@ function tickToDayHour(t) {
   return `DAY ${day} · ${hour}:${min}`;
 }
 
-// ─── Milestone & Epitaph helpers ──────────────────────────────────────────────
-// MILESTONES and EPITAPHS are imported from speranza-lore.js
-// Translates lore trigger objects into a snap check
-function checkMilestoneTrigger(trigger, snap) {
-  if (trigger.raidsRepelled        !== undefined && snap.raidsRepelled        < trigger.raidsRepelled)        return false;
-  if (trigger.totalDeaths          !== undefined && snap.totalDeaths          < trigger.totalDeaths)          return false;
-  if (trigger.expeditionsCompleted !== undefined && snap.expeditionsCompleted < trigger.expeditionsCompleted) return false;
-  if (trigger.population           !== undefined && snap.population           < trigger.population)           return false;
-  if (trigger.day                  !== undefined && snap.day                  < trigger.day)                  return false;
-  if (trigger.schematics           !== undefined && snap.schematics           < trigger.schematics)           return false;
-  if (trigger.t3Built              !== undefined && snap.t3Built              < trigger.t3Built)              return false;
-  if (trigger.morale               !== undefined && snap.morale               < trigger.morale)               return false;
-  if (trigger.moraleLow            !== undefined && snap.morale               > trigger.moraleLow)            return false;
-  if (trigger.largeRaidsRepelled   !== undefined && snap.largeRaidsRepelled   < trigger.largeRaidsRepelled)   return false;
-  if (trigger.commandersKilled     !== undefined && (snap.commandersKilled  ?? 0) < trigger.commandersKilled) return false;
-  if (trigger.harvestersDestroyed  !== undefined && (snap.harvestersDestroyed ?? 0) < trigger.harvestersDestroyed) return false;
-  if (trigger.tradersVisited       !== undefined && (snap.tradersVisited    ?? 0) < trigger.tradersVisited)   return false;
-  if (trigger.level5Colonists      !== undefined && (snap.level5Colonists   ?? 0) < trigger.level5Colonists)  return false;
-  if (trigger.artifacts            !== undefined && (snap.artifacts         ?? 0) < trigger.artifacts)        return false;
-  if (trigger.directivesActive     !== undefined && (snap.directivesActive  ?? 0) < trigger.directivesActive) return false;
-  return true;
-}
+// ─── Milestone Definitions ────────────────────────────────────────────────────
+const MILESTONE_DEFS = [
+  { id: "firstRaidSurvived",   check: (s) => s.raidsRepelled >= 1,           title: "FIRST RAID REPELLED",       text: "They found you. You're still here. That won't be the last of them." },
+  { id: "firstDeath",          check: (s) => s.memorial.length >= 1,          title: "THE FIRST LOSS",             text: "We lost our first. It won't be the last. Remember them." },
+  { id: "firstExpedReturn",    check: (s) => s.expeditionsCompleted >= 1,     title: "FIRST EXPEDITION RETURNED",  text: "They came back. That's not always guaranteed." },
+  { id: "pop8",                check: (s) => s.colonists.length >= 8,         title: "EIGHT COLONISTS",            text: "Eight mouths. Eight reasons to keep the lights on." },
+  { id: "pop12",               check: (s) => s.colonists.length >= 12,        title: "TWELVE COLONISTS",           text: "A real colony now. With all the problems that come with it." },
+  { id: "day7",                check: (s) => s.tick >= 48 * 7,               title: "ONE WEEK UNDERGROUND",       text: "Seven days. The colony holds." },
+  { id: "day14",               check: (s) => s.tick >= 48 * 14,              title: "TWO WEEKS",                  text: "Fourteen days. Some colonies don't last this long." },
+  { id: "day30",               check: (s) => s.tick >= 48 * 30,              title: "ONE MONTH",                  text: "A month in the dark. Keep going." },
+  { id: "day60",               check: (s) => s.tick >= 48 * 60,              title: "TWO MONTHS",                 text: "Sixty days underground. The colony has outlasted most." },
+  { id: "moraleHigh",          check: (s) => s.morale >= 85,                  title: "COLONY MORALE: HIGH",        text: "Morale has never been higher. Don't waste it." },
+  { id: "moraleLow",           check: (s) => s.morale <= -50,                 title: "MORALE: FRACTURED",          text: "People are starting to ask what they're even fighting for." },
+  { id: "firstLargeRaid",      check: (s) => s.largeRaidsRepelled >= 1,       title: "LARGE RAID SURVIVED",        text: "A full Arc assault. We're still here." },
+];
+
+// Epitaph pools for memorial entries
+const EPITAPHS = {
+  raidKilled:       ["Held their post. Didn't make it.", "Was in the wrong room when the strike hit.", "Didn't run. That wasn't in them.", "Took the hit that was meant for someone else. Maybe.", "Died the way they lived — at their post."],
+  expeditionKilled: ["Went topside one too many times.", "The surface takes eventually. It took them.", "Knew the risk. Went anyway. That was them.", "Their last transmission was clear. Then it wasn't.", "Volunteered for the run. Nobody made them."],
+  raidFled:         ["Left during a raid. Nobody blames them. Not out loud.", "The fear got them in the end.", "Decided the odds weren't worth it."],
+  moraleDeath:      ["The colony couldn't hold them here anymore.", "Left when the lights went out in people's eyes.", "Walked into the tunnels. Didn't say goodbye."],
+};
 
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function Speranza() {
   const [grid,       setGrid]       = useState(initGrid);
   const [res,        setRes]        = useState(INIT_RES);
   const [colonists,  setColonists]  = useState(initColonists); // array of colonist objects
-  const [heat,       setHeat]       = useState(0);
+  const [threat,     setThreat]     = useState(15);
   const [expeditions,  setExpeditions]  = useState([]);
   const [expedDuration, setExpedDuration] = useState(40);
   const [selected,   setSelected]   = useState(null);
   const [buildMenu,  setBuildMenu]  = useState(false);
-  const [hoveredBuildKey, setHoveredBuildKey] = useState(null);
-  const [journalOpen, setJournalOpen] = useState(false);
-  const [effectsOpen, setEffectsOpen] = useState(false);
   const [netFlow,    setNetFlow]    = useState({ energy: 0, food: 0, water: 0, scrap: 0 });
   const [rosterOpen, setRosterOpen] = useState(true);
   const [log,        setLog]        = useState([
@@ -443,7 +385,7 @@ export default function Speranza() {
   // 0 = paused, otherwise multiplier applied to TICK_MS
   const TIMESCALES = [0, 0.5, 1, 2, 4, 10];
   const [timescale,   setTimescale]   = useState(1);
-  const [musicVolume, setMusicVolumeState] = useState(() => Math.round(getMusicVolume() * 100));
+  const [isMuted,     setIsMuted]     = useState(false);
   // activeRaid: null | { sizeKey, ticksLeft, strikeCountdown }
   const [activeRaid,  setActiveRaid]  = useState(null);
   // Pass 1 new state
@@ -456,30 +398,10 @@ export default function Speranza() {
   const [firedMilestones,    setFiredMilestones]    = useState([]);
   const [milestoneToast,     setMilestoneToast]     = useState(null);
   const [hoveredCell,        setHoveredCell]        = useState(null);
-  const [hoveredColonist,    setHoveredColonist]    = useState(null);
-  const [hoveredFlowStat,    setHoveredFlowStat]    = useState(null);
-  const [mousePos,           setMousePos]           = useState({ x: 0, y: 0 });
-  const [gridMetrics,        setGridMetrics]        = useState({ cellW: 96, cellH: 78, depthCol: 28, surfaceBarH: 24 });
-  const [statBreakdown, setStatBreakdown] = useState({
-    energy: { ...EMPTY_STAT_BREAKDOWN },
-    food: { ...EMPTY_STAT_BREAKDOWN },
-    water: { ...EMPTY_STAT_BREAKDOWN },
-    morale: { ...EMPTY_STAT_BREAKDOWN },
-  });
   const [selectedColonist,   setSelectedColonist]   = useState(null);
   const [raidsRepelled,      setRaidsRepelled]      = useState(0);
   const [largeRaidsRepelled, setLargeRaidsRepelled] = useState(0);
   const [expeditionsCompleted, setExpeditionsCompleted] = useState(0);
-  // Session B additions
-  const [surfaceCondition,      setSurfaceCondition]      = useState(SURFACE_CONDITIONS[0]); // starts as CLEAR
-  const [surfaceConditionTimer, setSurfaceConditionTimer] = useState(0);
-  const [peakPopulation,        setPeakPopulation]        = useState(3);
-  const [activeDilemma,         setActiveDilemma]         = useState(null);
-  const [dilemmaTimer,          setDilemmaTimer]          = useState(0);
-  const [firedDilemmas,         setFiredDilemmas]         = useState([]);
-  const [recentDilemmaOutcomes, setRecentDilemmaOutcomes] = useState([]);
-  const [historyLog,            setHistoryLog]            = useState([]);
-  const [heatSuppressedTicks,   setHeatSuppressedTicks]   = useState(0);
 
   // ── Derived ───────────────────────────────────────────────────────────────
   // These are computed from colonists array — no separate state needed
@@ -532,128 +454,33 @@ export default function Speranza() {
   useEffect(() => { raidsRepelledRef.current        = raidsRepelled;       }, [raidsRepelled]);
   useEffect(() => { largeRaidsRepelledRef.current   = largeRaidsRepelled;  }, [largeRaidsRepelled]);
   useEffect(() => { expeditionsCompletedRef.current = expeditionsCompleted;}, [expeditionsCompleted]);
-  // Session B refs
-  const surfaceConditionRef = useRef(surfaceCondition);
-  const heatRef             = useRef(heat);
-  const firedDilemmasRef    = useRef(firedDilemmas);
-  const heatSuppressedTicksRef = useRef(heatSuppressedTicks);
-  const raidSuppressedThisRaidRef = useRef(0);
-  useEffect(() => { surfaceConditionRef.current = surfaceCondition; }, [surfaceCondition]);
-  useEffect(() => { heatRef.current             = heat;             }, [heat]);
-  useEffect(() => { firedDilemmasRef.current    = firedDilemmas;    }, [firedDilemmas]);
-  useEffect(() => { heatSuppressedTicksRef.current = heatSuppressedTicks; }, [heatSuppressedTicks]);
-
-  // ── Track mouse position for tooltips ───────────────────────────────────
-  useEffect(() => {
-    const handler = (e) => setMousePos({ x: e.clientX, y: e.clientY });
-    window.addEventListener("mousemove", handler);
-    return () => window.removeEventListener("mousemove", handler);
-  }, []);
-
-  // ── Track measured grid layout for mortise overlay alignment ───────────
-  useEffect(() => {
-    const measureGridMetrics = () => {
-      const cellEl = document.querySelector(".grid-cell");
-      const depthEl = document.querySelector(".depth-col");
-      const surfaceBarEl = document.querySelector(".surface-bar");
-      if (!cellEl || !depthEl || !surfaceBarEl) return;
-
-      const next = {
-        cellW: cellEl.offsetWidth || 96,
-        cellH: cellEl.offsetHeight || 78,
-        depthCol: depthEl.offsetWidth || 28,
-        surfaceBarH: surfaceBarEl.offsetHeight || 24,
-      };
-
-      setGridMetrics(prev => (
-        prev.cellW === next.cellW &&
-        prev.cellH === next.cellH &&
-        prev.depthCol === next.depthCol &&
-        prev.surfaceBarH === next.surfaceBarH
-      ) ? prev : next);
-    };
-
-    const rafId = window.requestAnimationFrame(measureGridMetrics);
-    window.addEventListener("resize", measureGridMetrics);
-    return () => {
-      window.cancelAnimationFrame(rafId);
-      window.removeEventListener("resize", measureGridMetrics);
-    };
-  }, [unlockedRows.length]);
 
   // ── Audio: start music on first interaction ───────────────────────────────
   const handleFirstInteraction = useCallback(() => {
     startMusic();
   }, []);
 
-  const handleMusicVolumeChange = useCallback((e) => {
-    const next = Number(e.target.value);
-    setMusicVolumeState(next);
-    setMusicVolume(next / 100);
+  const toggleMute = useCallback(() => {
+    const next = !getMuted();
+    setMuted(next);
+    setIsMuted(next);
   }, []);
 
   const addLog = useCallback((msg) => {
     setLog(prev => [`[${tickToDayHour(tickRef.current)}] ${msg}`, ...prev.slice(0, 29)]);
   }, []);
 
-  const timescaleBeforeToastRef = useRef(1); // stores timescale to restore after toasts clear
-  const forcedPauseByOverlayRef = useRef(false);
-  const toastDedupeRef = useRef(new Map());
-
-  const addToast = useCallback((message, type = "info", opts = {}) => {
-    const dedupeKey = opts.key ?? `${type}:${message}`;
-    const dedupeMs = opts.dedupeMs ?? 1200;
-    const now = Date.now();
-    const last = toastDedupeRef.current.get(dedupeKey);
-    if (last && now - last < dedupeMs) return;
-    toastDedupeRef.current.set(dedupeKey, now);
-
-    if (toastDedupeRef.current.size > 200) {
-      for (const [k, t] of toastDedupeRef.current.entries()) {
-        if (now - t > 60000) toastDedupeRef.current.delete(k);
-      }
-    }
-
+  const addToast = useCallback((message, type = "info") => {
     const id = `toast-${Date.now()}-${Math.random()}`;
     setToasts(prev => [...prev, { id, message, type }]);
-    // Auto-dismiss after 10s
-    setTimeout(() => {
-      setToasts(prev => prev.filter(t => t.id !== id));
-    }, 10000);
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 4500);
   }, []);
-
-  useEffect(() => {
-    const buildMenuOpen = !!(buildMenu && selected && grid[selected.r]?.[selected.c] && !grid[selected.r][selected.c].type);
-    const traitPickerOpen = colonists.some(c => c.pendingTraitPick);
-    const popupActive =
-      traitPickerOpen ||
-      !!gameOver ||
-      !!activeDilemma ||
-      buildMenuOpen ||
-      !!milestoneToast ||
-      toasts.length > 0 ||
-      journalOpen ||
-      effectsOpen;
-
-    if (popupActive) {
-      if (!forcedPauseByOverlayRef.current && timescale !== 0) {
-        timescaleBeforeToastRef.current = timescale;
-      }
-      forcedPauseByOverlayRef.current = true;
-      if (timescale !== 0) setTimescale(0);
-    } else if (forcedPauseByOverlayRef.current) {
-      forcedPauseByOverlayRef.current = false;
-      setTimescale(timescaleBeforeToastRef.current || 1);
-    }
-  }, [buildMenu, selected, grid, colonists, gameOver, activeDilemma, milestoneToast, toasts.length, journalOpen, effectsOpen, timescale]);
 
   const changeMorale = useCallback((delta, reason) => {
     setMorale(prev => clamp(prev + delta, -100, 100));
-    moraleEventDeltasRef.current.push({ delta, reason: reason ?? "morale event" });
     if (Math.abs(delta) >= 10) addLog(`${delta > 0 ? "📈" : "📉"} Morale ${delta > 0 ? "+" : ""}${delta} — ${reason}`);
   }, []);
   const changeMoraleRef = useRef(changeMorale);
-  const moraleEventDeltasRef = useRef([]);
   useEffect(() => { changeMoraleRef.current = changeMorale; }, [changeMorale]);
 
   // ── Memorial helper ───────────────────────────────────────────────────────
@@ -674,35 +501,20 @@ export default function Speranza() {
       })(),
       epitaph,
     };
-    setMemorial(prev => {
-      if (prev.length === 0) addHistoryRef.current("💀", `First loss: ${entry.name}`);
-      return [entry, ...prev];
-    });
+    setMemorial(prev => [entry, ...prev]);
   }, []);
   const addToMemorialRef = useRef(addToMemorial);
   useEffect(() => { addToMemorialRef.current = addToMemorial; }, [addToMemorial]);
 
-  // Memorial Hall passive: checks grid for built memorial
-  const hasMemorialHall = () => gridRef.current.some(row => row.some(cell => cell.type === "memorial"));
-
-  // History log — records key colony events for the game-over timeline
-  const addHistory = useCallback((icon, text) => {
-    setHistoryLog(prev => [...prev, { tick: tickRef.current, day: Math.floor(tickRef.current / 48) + 1, icon, text }]);
-  }, []);
-  const addHistoryRef = useRef(addHistory);
-  useEffect(() => { addHistoryRef.current = addHistory; }, [addHistory]);
-
   // ── Milestone checker ─────────────────────────────────────────────────────
   const checkMilestones = useCallback((snap) => {
-    for (const m of MILESTONES) {
+    for (const m of MILESTONE_DEFS) {
       if (firedMilestonesRef.current.includes(m.id)) continue;
-      if (checkMilestoneTrigger(m.trigger, snap)) {
+      if (m.check(snap)) {
         setFiredMilestones(prev => [...prev, m.id]);
         setMilestoneToast({ title: m.title, text: m.text });
         changeMoraleRef.current(5, `milestone: ${m.title}`);
-        addHistoryRef.current("⭐", m.title);
-        playMilestone();
-        break;
+        break; // one per tick
       }
     }
   }, []);
@@ -718,12 +530,6 @@ export default function Speranza() {
       const g    = gridRef.current;
       const cols = colonistsRef.current;
       const totalCol = cols.length;
-      let resourceBreakdownSnapshot = {
-        energy: { ...EMPTY_STAT_BREAKDOWN },
-        food: { ...EMPTY_STAT_BREAKDOWN },
-        water: { ...EMPTY_STAT_BREAKDOWN },
-      };
-      const moraleTickBreakdown = { plus: [], minus: [], net: 0 };
 
       // 0. Passive morale ────────────────────────────────────────────────────
       {
@@ -736,47 +542,15 @@ export default function Speranza() {
         const moraleDrain    = Math.max(0, totalCol - 7) * 0.3;
         const moraleGain     = moraleWorkers * 1.5;
         const netMoraleDelta = moraleGain - moraleDrain;
-        if (moraleGain > 0) moraleTickBreakdown.plus.push(`Comfort services staffed +${moraleGain.toFixed(1)}`);
-        if (moraleDrain > 0) moraleTickBreakdown.minus.push(`Crowding strain -${moraleDrain.toFixed(1)}`);
-        moraleTickBreakdown.net += netMoraleDelta;
         setMorale(prev => clamp(prev + netMoraleDelta, -100, 100));
         const veteranCount = cols.filter(c => c.traits?.includes("veteran")).length;
-        if (veteranCount > 0) {
-          const veteranBonus = veteranCount * 0.1;
-          moraleTickBreakdown.plus.push(`Veteran confidence +${veteranBonus.toFixed(1)}`);
-          moraleTickBreakdown.net += veteranBonus;
-          setMorale(prev => clamp(prev + veteranBonus, -100, 100));
-        }
-        // Quirk passive morale effects
-        let quirkMoraleDelta = 0;
-        cols.forEach(c => {
-          if (!c.quirk) return;
-          if (c.quirk.id === "lightSleeper" && c.status !== "injured") quirkMoraleDelta += 0.1;
-          if (c.quirk.id === "claustrophobic") quirkMoraleDelta -= 0.1;
-        });
-        if (quirkMoraleDelta > 0) moraleTickBreakdown.plus.push(`Helpful quirk effects +${quirkMoraleDelta.toFixed(1)}`);
-        if (quirkMoraleDelta < 0) moraleTickBreakdown.minus.push(`Stressful quirk effects ${quirkMoraleDelta.toFixed(1)}`);
-        if (quirkMoraleDelta !== 0) {
-          moraleTickBreakdown.net += quirkMoraleDelta;
-          setMorale(prev => clamp(prev + quirkMoraleDelta, -100, 100));
-        }
+        if (veteranCount > 0) setMorale(prev => clamp(prev + veteranCount * 0.1, -100, 100));
       }
 
       // 1. Resource production ───────────────────────────────────────────────
       setRes(prev => {
         const next = { ...prev };
         const flow = { energy: 0, food: 0, water: 0, scrap: 0, rp: 0 };
-        const statReasons = {
-          energy: { plus: [], minus: [], net: 0 },
-          food: { plus: [], minus: [], net: 0 },
-          water: { plus: [], minus: [], net: 0 },
-        };
-        const pushReason = (stat, delta, reason) => {
-          if (!statReasons[stat] || delta === 0) return;
-          if (delta > 0) statReasons[stat].plus.push(`${reason} +${delta.toFixed(1)}`);
-          if (delta < 0) statReasons[stat].minus.push(`${reason} ${delta.toFixed(1)}`);
-          statReasons[stat].net += delta;
-        };
 
         g.forEach(row => row.forEach(cell => {
           if (!cell.type || !cell.workers) return;
@@ -794,12 +568,10 @@ export default function Speranza() {
           for (const [r, amt] of Object.entries(def.consumes)) {
             next[r] = clamp(next[r] - amt * cell.workers, 0, MAX_RES);
             flow[r] -= amt * cell.workers;
-            if (r === "energy" || r === "food" || r === "water") pushReason(r, -(amt * cell.workers), `${def.label} upkeep`);
           }
           for (const [r, amt] of Object.entries(def.produces)) {
             next[r] = clamp(next[r] + amt * cell.workers, 0, MAX_RES);
             flow[r] += amt * cell.workers;
-            if (r === "energy" || r === "food" || r === "water") pushReason(r, amt * cell.workers, `${def.label} output`);
           }
         }));
 
@@ -808,7 +580,6 @@ export default function Speranza() {
           if (cell.type === "armory" && cell.workers > 0) {
             next.energy = clamp(next.energy - 1, 0, MAX_RES);
             flow.energy -= 1;
-            pushReason("energy", -1, "Armory operation");
           }
         }));
 
@@ -819,16 +590,12 @@ export default function Speranza() {
             next.energy = clamp(next.energy - 1 * cell.workers, 0, MAX_RES);
             flow.water  -= 1 * cell.workers;
             flow.energy -= 1 * cell.workers;
-            pushReason("water", -(1 * cell.workers), "Tavern operation");
-            pushReason("energy", -(1 * cell.workers), "Tavern operation");
           }
           if (cell.type === "diningHall" && cell.workers > 0) {
             next.food   = clamp(next.food   - 2 * cell.workers, 0, MAX_RES);
             next.energy = clamp(next.energy - 1 * cell.workers, 0, MAX_RES);
             flow.food   -= 2 * cell.workers;
             flow.energy -= 1 * cell.workers;
-            pushReason("food", -(2 * cell.workers), "Dining Hall operation");
-            pushReason("energy", -(1 * cell.workers), "Dining Hall operation");
           }
         }));
 
@@ -837,135 +604,103 @@ export default function Speranza() {
           if (cell.type === "arcTurret" && !cell.damaged) {
             next.energy = clamp(next.energy - 2, 0, MAX_RES);
             flow.energy -= 2;
-            pushReason("energy", -2, "Arc Turret drain");
           }
           if (cell.type === "empArray" && cell.workers > 0 && !cell.damaged) {
             next.energy = clamp(next.energy - 3 * cell.workers, 0, MAX_RES);
             flow.energy -= 3 * cell.workers;
-            pushReason("energy", -(3 * cell.workers), "EMP Array drain");
           }
           if (cell.type === "geothermal" && !cell.damaged) {
             next.energy = clamp(next.energy + 6, 0, MAX_RES);
             flow.energy += 6;
-            pushReason("energy", 6, "Geothermal generation");
           }
         }));
 
-        // Colonist upkeep — based on total headcount, ironStomach quirk reduces food/water
-        const condFoodMult = surfaceConditionRef.current.effects.foodDrainMult ?? 1.0;
+        // Colonist upkeep — based on total headcount
         for (const [r, amt] of Object.entries(DRAIN_PER_COL)) {
-          let drain = 0;
-          cols.forEach(c => {
-            let mult = (c.quirk?.id === "ironStomach" && (r === "food" || r === "water")) ? 0.7 : 1.0;
-            if (r === "food") mult *= condFoodMult;
-            drain += amt * mult;
-          });
+          const drain = amt * totalCol;
           next[r]  = clamp(next[r] - drain, 0, MAX_RES);
           flow[r] -= drain;
-          if (r === "energy" || r === "food" || r === "water") pushReason(r, -drain, "Colony upkeep");
         }
 
         // Morale production bonus — morale > 75 gives +10% of positive flow
         if (moraleRef.current > 75) {
           for (const [r, val] of Object.entries(flow)) {
             if (val > 0) next[r] = clamp(next[r] + val * 0.1, 0, MAX_RES);
-            if (val > 0 && (r === "energy" || r === "food" || r === "water")) pushReason(r, val * 0.1, "High-morale efficiency");
           }
         }
 
         setNetFlow(flow);
-        resourceBreakdownSnapshot = statReasons;
         if (next.food <= 0 && next.water <= 0) {
-          const currentTick = tickRef.current;
-          const daysAlive = Math.floor(currentTick / 48) + 1;
-          setGameOver({
-            reason: "No food or water — colony collapsed.",
-            daysAlive,
-            tick: currentTick,
-            raidsRepelled: raidsRepelledRef.current,
-            casualties: memorialRef.current,
-            peakPop: peakPopulation,
-          });
+          setGameOver("💀 Colony lost — no food or water. Survivors scattered.");
         }
         return next;
       });
 
-      // 2. Heat buildup + probabilistic raid trigger ──────────────────────────
+      // 2. Threat buildup + raid window ─────────────────────────────────────
       const builtRooms     = g.flatMap(row => row).filter(cell => cell.type).length;
-      const condThreatMult = surfaceConditionRef.current.effects.threatMult ?? 1.0;
+      const threatThisTick = THREAT_PER_TICK + builtRooms * 0.8;
       const rw             = raidWindowRef.current;
       const ar             = activeRaidRef.current;
-      const heatGainSuppressed = heatSuppressedTicksRef.current > 0;
 
       if (rw) {
         // ── Raid window is open — roll each tick to launch or escalate ──────
         if (Math.random() < RAID_LAUNCH_CHANCE) {
+          // Fire the raid at current size
           const sizeKey  = RAID_SIZE_ORDER[rw.sizeIdx];
           const sizeDef  = RAID_SIZES[sizeKey];
+
+          // ── Barricade block check (if unlocked) ───────────────────────────
           const barricadesActive = unlockedTechsRef.current.includes("barricades");
           const blockChance = { small: 0.75, medium: 0.30, large: 0.10 }[sizeKey] ?? 0;
           if (barricadesActive && Math.random() < blockChance) {
+            // Raid blocked — costs scrap to repair barricades
             const repairCost = 15;
             addLog(`🛡 BARRICADES HELD — ${sizeDef.label} raid repelled! (${repairCost} scrap to repair)`);
-            addToast(`🛡 BARRICADES HELD\n${sizeDef.label} raid repelled.\n-${repairCost} scrap for repairs.`, "success", { key: `barricades-held-${sizeKey}` });
+            addToast(`🛡 BARRICADES HELD\n${sizeDef.label} raid repelled.\n-${repairCost} scrap for repairs.`, "success");
             setRes(prev => ({ ...prev, scrap: Math.max(0, prev.scrap - repairCost) }));
             setRaidFlash(true);
             setTimeout(() => setRaidFlash(false), 500);
             setRaidWindow(null);
-            setHeat(prev => clamp(prev - 40, 0, HEAT_MAX)); // barricade block slightly lowers heat
+            setThreat(25);
             changeMoraleRef.current(10, "barricades held");
-            playBarricadesHold();
           } else {
-            raidSuppressedThisRaidRef.current = 0;
+            // ── Begin active raid phase ──────────────────────────────────────
             setActiveRaid({ sizeKey, ticksLeft: sizeDef.duration, strikeCountdown: sizeDef.strikeEvery });
             setRaidWindow(null);
-            setHeat(prev => clamp(prev + (heatGainSuppressed ? 0 : HEAT_RAID_GAIN), 0, HEAT_MAX)); // raid starting raises heat
             duckMusic();
             playRaid();
             setRaidFlash(true);
             setTimeout(() => setRaidFlash(false), 800);
             addLog(`⚔ ${sizeDef.icon} ${sizeDef.label} RAID UNDERWAY — ${sizeDef.duration} ticks! First strike in ${sizeDef.strikeEvery}.`);
-            addToast(`⚔ ${sizeDef.label} RAID IN PROGRESS\nArc forces breaching the perimeter.\nFirst strike in ${sizeDef.strikeEvery} ticks.`, "raid", { key: `raid-start-${sizeKey}` });
-          }
+            addToast(`⚔ ${sizeDef.label} RAID IN PROGRESS\nArc forces breaching the perimeter.\nFirst strike in ${sizeDef.strikeEvery} ticks.`, "raid");
+          } // end barricade else
+
         } else {
+          // Raid delayed — escalate size for next roll
           const nextSizeIdx = Math.min(rw.sizeIdx + 1, RAID_SIZE_ORDER.length - 1);
           const escalated   = nextSizeIdx > rw.sizeIdx;
           if (escalated) {
             const newLabel = RAID_SIZES[RAID_SIZE_ORDER[nextSizeIdx]].label;
             addLog(`⚠ Arc forces regrouping — raid escalated to ${newLabel}!`);
-            addToast(`⚠ RAID ESCALATING\nArc forces regrouped.\nIncoming raid is now ${newLabel}.`, "injury", { key: `raid-escalating-${newLabel}` });
+            addToast(`⚠ RAID ESCALATING\nArc forces regrouped.\nIncoming raid is now ${newLabel}.`, "injury");
           }
           setRaidWindow({ sizeIdx: nextSizeIdx, escalations: rw.escalations + 1 });
         }
 
       } else if (!ar) {
-        // ── No active raid — update heat, then roll for raid trigger ──────────
+        // ── No active raid window or active raid — build threat normally ─────
         let sentryCount = 0;
         g.forEach(row => row.forEach(cell => {
           if (cell.type === "sentryPost") sentryCount += cell.workers;
         }));
-        setHeat(prev => {
-          const gain    = heatGainSuppressed ? 0 : (HEAT_BASE_GAIN + builtRooms * HEAT_GAIN_PER_ROOM) * condThreatMult;
-          const sentry  = sentryCount * HEAT_SENTRY_REDUCTION;
-          const next    = clamp(prev + gain - HEAT_DECAY_PER_TICK - sentry, 0, HEAT_MAX);
-          // Probability-based raid trigger
-          const raidChance = HEAT_RAID_PROB_BASE + (next / HEAT_MAX) * HEAT_RAID_PROB_SCALE;
-          const condRaidMult = surfaceConditionRef.current.effects.raidFreqMult ?? 1.0;
-          if (tickRef.current % 48 === 0 && Math.random() < raidChance * condRaidMult) {
-            // Determine starting size based on heat state
-            const hState = getHeatState(next);
-            let sizeIdx = 0;
-            if (hState.label === "TARGETED" || hState.label === "HUNTED") sizeIdx = 1;
-            if (hState.label === "MARKED") sizeIdx = Math.random() < 0.4 ? 2 : 1;
-            setRaidWindow({ sizeIdx, escalations: 0 });
-            const hLabel = hState.label;
-            addLog(`☢ ${hLabel === "MARKED" ? "⚠ MARKED — " : ""}Arc forces detected — raid incoming!`);
-            const sensitives = cols.filter(c => c.quirk?.id === "arcSensitive");
-            if (sensitives.length > 0 && Math.random() < 0.2) {
-              const warnCol = sensitives[Math.floor(Math.random() * sensitives.length)];
-              addLog(`🔮 ${warnCol.name}'s instincts are firing. Something is coming.`);
-            }
-            addToast(`☢ ARC HEAT: ${hLabel}\nRaid incoming — stay alert.`, "injury", { key: `heat-raid-incoming-${hLabel}` });
+        setThreat(prev => {
+          const next = clamp(prev + threatThisTick - sentryCount * 5, 0, THREAT_RAID_THRESHOLD);
+          if (next >= THREAT_RAID_THRESHOLD) {
+            // Open a raid window starting at small
+            setRaidWindow({ sizeIdx: 0, escalations: 0 });
+            addLog("☢ Arc threat critical — raid window opened! Attack incoming...");
+            addToast("☢ ARC THREAT CRITICAL\nRaid incoming — size unknown.\nStay alert.", "injury");
+            return THREAT_RAID_THRESHOLD; // hold at max while window is open
           }
           return next;
         });
@@ -976,19 +711,7 @@ export default function Speranza() {
       if (arNow) {
         const sizeDef          = RAID_SIZES[arNow.sizeKey];
         const newStrikeCD      = arNow.strikeCountdown - 1;
-        let armoryWorkers = 0;
-        g.forEach(row => row.forEach(cell => {
-          if (cell.type === "armory") armoryWorkers += cell.workers;
-        }));
-        let suppressedUnits = 0;
-        for (let i = 0; i < armoryWorkers; i++) {
-          if (Math.random() < 0.12) suppressedUnits += 1;
-        }
-        if (suppressedUnits > 0) {
-          raidSuppressedThisRaidRef.current += suppressedUnits;
-          addLog(`⚔ Colony defenders pushed back — ${suppressedUnits} Arc unit(s) suppressed.`);
-        }
-        const newTicksLeft     = Math.max(0, arNow.ticksLeft - 1 - (suppressedUnits * 2));
+        const newTicksLeft     = arNow.ticksLeft - 1;
 
         // Pre-strike tick sound (5 ticks before strike)
         if (newStrikeCD === 5) playTickAlarm();
@@ -998,28 +721,23 @@ export default function Speranza() {
 
         // Strike fires this tick
         if (newStrikeCD <= 0 && newTicksLeft > 0) {
-          const memBonus = hasMemorialHall() ? 2 : 0; // memorial reduces raid strike morale loss by 2
-          changeMoraleRef.current(-3 + memBonus, "raid strike landed");
+          changeMoraleRef.current(-3, "raid strike landed");
           // T3 Defenses: Arc Turret + EMP Array (Pass 6)
           let raidSizeReduction = 0;
           g.forEach(row => row.forEach(cell => {
             if (cell.type === "arcTurret" && !cell.damaged) {
-              if (Math.random() < 0.30) {
-                raidSizeReduction++;
-                playTurret();
-              }
+              if (Math.random() < 0.30) raidSizeReduction++;
             }
             if (cell.type === "empArray" && cell.workers > 0 && !cell.damaged) {
               if (Math.random() < 0.50) {
                 raidSizeReduction++;
                 strikeDelayBonus += 3;
-                playEMP();
               }
             }
           }));
           if (raidSizeReduction > 0) {
             addLog(`🔫 Defenses active — ${raidSizeReduction} Arc unit(s) eliminated!`);
-            addToast(`🔫 DEFENSES ACTIVE\n${raidSizeReduction} Arc unit(s) eliminated.`, "success", { key: "defenses-active" });
+            addToast(`🔫 DEFENSES ACTIVE\n${raidSizeReduction} Arc unit(s) eliminated.`, "success");
           }
           const effectiveSizeDef = { ...sizeDef, targets: Math.max(1, sizeDef.targets - raidSizeReduction) };
           const atRisk = cols.filter(c => c.status === "working" || c.status === "onSentry" || c.status === "idle");
@@ -1028,6 +746,7 @@ export default function Speranza() {
             addLog(`💢 ${sizeDef.icon} ARC STRIKE — no exposed workers. Colony holds!`);
             addToast(`💢 ${sizeDef.label} STRIKE\nNo workers exposed — held the line.`, "raid");
           } else {
+            addLog(`💢 ${sizeDef.icon} ARC STRIKE — ${targets.length} colonist(s) hit!`);
             targets.forEach(target => {
               setGrid(prev => {
                 const ng = prev.map(row => row.map(c => ({ ...c })));
@@ -1044,54 +763,30 @@ export default function Speranza() {
               const roll = Math.random();
               // HARDENED: injury window shrinks from 30% to 20% (0.50–0.70 instead of 0.50–0.80)
               const injureThreshold = target.traits?.includes("hardened") ? 0.70 : 0.80;
-              // Quirk: steadyHands — kills become injuries, injuries become flee
-              const isParanoid     = target.quirk?.id === "paranoid";
-              const isSteadyHands  = target.quirk?.id === "steadyHands";
               if (roll < 0.50) {
-                // VETERAN or PARANOID: holds post — never flees
-                if (target.traits?.includes("veteran") || isParanoid) {
-                  addLog(`  → ${target.name} held their post — ${isParanoid ? "too stubborn to run" : "veteran resolve"}.`);
-                } else if (isSteadyHands) {
-                  // steadyHands: flee → close call, just log it
-                  addLog(`💢 ${sizeDef.icon} ARC STRIKE — ${target.name} barely made it out.`);
-                  changeMoraleRef.current(-2, "close call");
+                // VETERAN: holds post — never flees
+                if (target.traits?.includes("veteran")) {
+                  addLog(`  → ${target.name} held their post — veteran resolve.`);
                 } else {
                   setColonists(prev => prev.map(c => c.id === target.id ? { ...c, status: "idle" } : c));
                   addToMemorialRef.current(target, "raidFled", tickRef.current);
-                  addLog(`💢 ${sizeDef.icon} ARC STRIKE — ${target.name} fled their post!`);
+                  addLog(`  → ${target.name} fled their post!`);
                   addToast(`💢 ${sizeDef.label} STRIKE\n${target.name} fled — shaken but alive.`, "raid");
                   changeMoraleRef.current(-5, "colonist fled");
                 }
               } else if (roll < injureThreshold) {
-                // steadyHands: injury → flee instead
-                if (isSteadyHands) {
-                  setColonists(prev => prev.map(c => c.id === target.id ? { ...c, status: "idle" } : c));
-                  addLog(`💢 ${sizeDef.icon} ARC STRIKE — ${target.name} retreated (steady hands).`);
-                  changeMoraleRef.current(-3, "retreat");
-                } else {
-                  setColonists(prev => prev.map(c => c.id === target.id ? { ...c, status: "injured", injuryTicksLeft: INJURY_TICKS_BASE, injuryCount: (c.injuryCount ?? 0) + 1 } : c));
-                  addLog(`💢 ${sizeDef.icon} ARC STRIKE — ${target.name} was INJURED!`);
-                  addToast(`💢 ${sizeDef.label} STRIKE — CASUALTY\n${target.name} is injured.`, "injury");
-                  playInjury();
-                  changeMoraleRef.current(-10, "colonist injured in raid");
-                }
+                setColonists(prev => prev.map(c => c.id === target.id ? { ...c, status: "injured", injuryTicksLeft: INJURY_TICKS_BASE } : c));
+                addLog(`  → ${target.name} was INJURED!`);
+                addToast(`💢 ${sizeDef.label} STRIKE — CASUALTY\n${target.name} is injured.`, "injury");
+                playInjury();
+                changeMoraleRef.current(-10, "colonist injured in raid");
               } else {
-                // steadyHands: kill → injury instead
-                if (isSteadyHands) {
-                  setColonists(prev => prev.map(c => c.id === target.id ? { ...c, status: "injured", injuryTicksLeft: INJURY_TICKS_BASE, injuryCount: (c.injuryCount ?? 0) + 1 } : c));
-                  addLog(`💢 ${sizeDef.icon} ARC STRIKE — ${target.name} badly wounded (steady hands saved them).`);
-                  addToast(`💢 ${sizeDef.label} STRIKE\n${target.name} severely injured — but alive.`, "injury");
-                  playInjury();
-                  changeMoraleRef.current(-12, "severe injury");
-                } else {
-                  setColonists(prev => prev.filter(c => c.id !== target.id));
-                  addToMemorialRef.current(target, "raidKilled", tickRef.current);
-                  addLog(`💢 ${sizeDef.icon} ARC STRIKE — ${target.name} was KILLED.`);
-                  addToast(`💢 ${sizeDef.label} STRIKE — KIA\n${target.name} did not make it.`, "raid");
-                  playKill();
-                  const killPenalty = hasMemorialHall() ? -12 : -20;
-                  changeMoraleRef.current(killPenalty, "colonist killed");
-                }
+                setColonists(prev => prev.filter(c => c.id !== target.id));
+                addToMemorialRef.current(target, "raidKilled", tickRef.current);
+                addLog(`  → ${target.name} was KILLED.`);
+                addToast(`💢 ${sizeDef.label} STRIKE — KIA\n${target.name} did not make it.`, "raid");
+                playKill();
+                changeMoraleRef.current(-20, "colonist killed");
               }
             });
           }
@@ -1119,8 +814,7 @@ export default function Speranza() {
                   return ng;
                 });
                 addLog(`💥 ${ROOM_TYPES[dmgTarget.type].label} took structural damage!`);
-                addToast(`💥 STRUCTURAL DAMAGE\n${ROOM_TYPES[dmgTarget.type].label} damaged.\nRepair costs 20 scrap.`, "injury", { key: `structural-damage-${dmgTarget.type}` });
-                playStructuralDamage();
+                addToast(`💥 STRUCTURAL DAMAGE\n${ROOM_TYPES[dmgTarget.type].label} damaged.\nRepair costs 20 scrap.`, "injury");
               }
             }
           }
@@ -1131,44 +825,23 @@ export default function Speranza() {
         // End raid or continue
         if (newTicksLeft <= 0) {
           setActiveRaid(null);
-          setColonists(prev => prev.map(c => ({ ...c, raidsSurvived: (c.raidsSurvived ?? 0) + 1 })));
-          setHeat(prev => clamp(prev - 30, 0, HEAT_MAX)); // raid ending reduces heat slightly
+          setThreat(25);
           unduckMusic();
           addLog(`✅ ${sizeDef.label} raid repelled — Arc forces withdrew.`);
-          addToast(`✅ RAID OVER\n${sizeDef.label} Arc forces withdrew.\nThreat level reset.`, "success", { key: `raid-over-${sizeDef.label}` });
-          playRaidOver();
+          addToast(`✅ RAID OVER\n${sizeDef.label} Arc forces withdrew.\nThreat level reset.`, "success");
+          playSuccess();
           changeMoraleRef.current(8, "raid survived");
-          if (raidSuppressedThisRaidRef.current > 0) {
-            changeMoraleRef.current(2, "defenders held the line");
-            addLog(`🛡 Defenders' stand lifted spirits (+2 morale).`);
-            if (Math.random() < 0.03) {
-              setSurfaceHaul(prev => ({ ...prev, arcTech: prev.arcTech + 1 }));
-              addLog("⚙ Rare Arc cache seized from retreating forces (+1 Arc Tech).");
-              addToast("⚙ DEFENDER BONUS\nRare Arc cache seized.\n+1 Arc Tech", "success", { key: `raid-bonus-${tickRef.current}` });
-            }
-          }
-          raidSuppressedThisRaidRef.current = 0;
-          setRaidsRepelled(prev => {
-            const n = prev + 1;
-            raidsRepelledRef.current = n;
-            if (n === 1) addHistoryRef.current("⚔", "First raid repelled");
-            return n;
-          });
-          if (arNow.sizeKey === "large") {
-            setLargeRaidsRepelled(prev => { const n = prev + 1; largeRaidsRepelledRef.current = n; return n; });
-            addHistoryRef.current("⚔", `Large raid repelled`);
-          }
+          setRaidsRepelled(prev => { const n = prev + 1; raidsRepelledRef.current = n; return n; });
+          if (arNow.sizeKey === "large") setLargeRaidsRepelled(prev => { const n = prev + 1; largeRaidsRepelledRef.current = n; return n; });
           // milestone check snapshot
           checkMilestonesRef.current({
-            raidsRepelled:        raidsRepelledRef.current,
-            largeRaidsRepelled:   largeRaidsRepelledRef.current,
-            totalDeaths:          memorialRef.current.length,
+            raidsRepelled: raidsRepelledRef.current,
+            largeRaidsRepelled: largeRaidsRepelledRef.current,
+            memorial: memorialRef.current,
             expeditionsCompleted: expeditionsCompletedRef.current,
-            population:           colonistsRef.current.length,
-            day:                  Math.floor(tickRef.current / 48) + 1,
-            morale:               moraleRef.current,
-            schematics:           surfaceHaulRef.current.schematics.length,
-            t3Built:              0,
+            colonists: colonistsRef.current,
+            tick: tickRef.current,
+            morale: moraleRef.current,
           });
         } else {
           setActiveRaid({
@@ -1187,15 +860,6 @@ export default function Speranza() {
           const expColonists = colonistsRef.current.filter(c => exp.colonistIds.includes(c.id));
           let table = [...EXPEDITION_ROLL_TABLES[exp.type]];
           table = applyMoraleModifier(table, exp.moraleSnapshot);
-          const condEffects = exp.conditionSnapshot?.effects ?? {};
-          const expedGoodMult = condEffects.expedGoodMult ?? 1.0;
-          const expedBadMult  = condEffects.expedBadMult ?? 1.0;
-          table = table.map(e => ({
-            ...e,
-            weight: e.type === "good" ? e.weight * expedGoodMult
-                  : e.type === "bad"  ? e.weight * expedBadMult
-                  : e.weight,
-          }));
           expColonists.forEach(col => {
             if (col.traits?.includes("scavenger") && exp.type === "scav") {
               table = table.map(e => ({ ...e, weight: e.type === "good" ? e.weight * 1.15 : e.weight }));
@@ -1204,10 +868,6 @@ export default function Speranza() {
               table = table.map(e => ({ ...e, weight: e.type === "bad" ? e.weight * 0.9 : e.weight }));
             }
           });
-          // surfaceBorn quirk: +20% good weight
-          if (exp.quirkBonuses?.surfaceBorn) {
-            table = table.map(e => ({ ...e, weight: e.type === "good" ? e.weight * 1.2 : e.weight }));
-          }
 
           const totalWeight = table.reduce((s, e) => s + e.weight, 0);
           let rand = Math.random() * totalWeight;
@@ -1216,35 +876,27 @@ export default function Speranza() {
 
           const result = picked.apply(exp);
           const tickLabel = `[T${tickRef.current}]`;
-          // Expedition radio chatter — prefix to log entries unless expedSilent
-          const getChatter = (outcomeType) => {
-            if (surfaceConditionRef.current.effects.expedSilent) return "";
-            const pool = EXPEDITION_FLAVOR[exp.type]?.[outcomeType];
-            if (!pool || pool.length === 0) return "";
-            return pool[Math.floor(Math.random() * pool.length)] + " ";
-          };
 
           if (result === "injure" || result === "kill") {
             const target = expColonists.length > 0 ? expColonists[Math.floor(Math.random() * expColonists.length)] : null;
             if (target) {
               if (result === "injure") {
-                setColonists(p => p.map(c => c.id === target.id ? { ...c, status: "injured", injuryTicksLeft: INJURY_TICKS_BASE, injuryCount: (c.injuryCount ?? 0) + 1 } : c));
-                updated.eventLog = [...updated.eventLog, `${tickLabel} ${getChatter("bad")}${target.name} ${picked.label}.`];
+                setColonists(p => p.map(c => c.id === target.id ? { ...c, status: "injured", injuryTicksLeft: INJURY_TICKS_BASE } : c));
+                updated.eventLog = [...updated.eventLog, `${tickLabel} ${target.name} ${picked.label}.`];
                 changeMoraleRef.current(-10, "colonist injured on expedition");
                 playInjury();
               } else {
                 setColonists(p => p.filter(c => c.id !== target.id));
                 addToMemorialRef.current(target, "expeditionKilled", tickRef.current);
-                updated.eventLog = [...updated.eventLog, `${tickLabel} ${getChatter("bad")}${target.name} ${picked.label}.`];
-                const expKillPenalty = hasMemorialHall() ? -12 : -20;
-                changeMoraleRef.current(expKillPenalty, "colonist killed on expedition");
+                updated.eventLog = [...updated.eventLog, `${tickLabel} ${target.name} ${picked.label}.`];
+                changeMoraleRef.current(-20, "colonist killed on expedition");
                 playKill();
               }
             }
           } else if (typeof result === "object") {
             const newLoot = { ...updated.lootAccumulated };
-            if (result.scrap)    { newLoot.scrap    = (newLoot.scrap    || 0) + result.scrap + (exp.quirkBonuses?.packRat ? 1 : 0); }
-            if (result.salvage)  { newLoot.salvage  = (newLoot.salvage  || 0) + result.salvage + (exp.quirkBonuses?.packRat ? 1 : 0); }
+            if (result.scrap)    { newLoot.scrap    = (newLoot.scrap    || 0) + result.scrap; }
+            if (result.salvage)  { newLoot.salvage  = (newLoot.salvage  || 0) + result.salvage; }
             if (result.arcTech)  { newLoot.arcTech  = (newLoot.arcTech  || 0) + result.arcTech; }
             if (result.survivor) { newLoot.survivor = true; }
             if (result.schematic) {
@@ -1260,9 +912,7 @@ export default function Speranza() {
             }
             updated.lootAccumulated = newLoot;
             if (picked.type !== "neutral") {
-              updated.eventLog = [...updated.eventLog, `${tickLabel} ${getChatter(picked.type)}${picked.label}.`];
-            } else {
-              updated.eventLog = [...updated.eventLog, `${tickLabel} ${getChatter("neutral")}${picked.label}.`];
+              updated.eventLog = [...updated.eventLog, `${tickLabel} ${picked.label}.`];
             }
           }
           updated.rollCountdown = exp.rollEvery;
@@ -1279,24 +929,18 @@ export default function Speranza() {
             }));
           }
           if (loot.survivor) {
-            const newCol = makeColonist(tickRef.current);
+            const newCol = makeColonist();
             setColonists(p => [...p, newCol]);
             addLog(`🧍 Surface survivor found — ${newCol.name} joined the colony!`);
           }
-          setColonists(p => p.map(c => updated.colonistIds.includes(c.id)
-            ? { ...c, status: "idle", expeditionsCompleted: (c.expeditionsCompleted ?? 0) + 1 }
-            : c
-          ));
+          setColonists(p => p.map(c => updated.colonistIds.includes(c.id) ? { ...c, status: "idle" } : c));
           const hasGoodLoot = (loot.scrap || 0) > 0 || (loot.salvage || 0) > 0 || (loot.arcTech || 0) > 0;
           addLog(`✅ Expedition returned. ${hasGoodLoot ? `+${loot.scrap || 0} scrap${loot.salvage ? ` · +${loot.salvage} salvage` : ""}${loot.arcTech ? ` · +${loot.arcTech} arcTech` : ""}` : "Empty-handed."}`);
           addToast(`✅ EXPEDITION COMPLETE\n${hasGoodLoot ? "Resources recovered." : "They came back empty-handed."}`, hasGoodLoot ? "success" : "info");
-          const baseMoraleChange = hasGoodLoot ? 8 : -5;
-          const loudmouthBonus = (updated.quirkBonuses?.loudmouth && hasGoodLoot) ? 5 : 0;
-          changeMoraleRef.current(baseMoraleChange + loudmouthBonus, hasGoodLoot ? "expedition success" : "expedition failed");
+          changeMoraleRef.current(hasGoodLoot ? 8 : -5, hasGoodLoot ? "expedition success" : "expedition failed");
           setExpeditionsCompleted(prev => {
             const next = prev + 1;
             expeditionsCompletedRef.current = next;
-            if (next === 1) addHistoryRef.current("🗺", "First expedition returned");
             return next;
           });
           playSuccess();
@@ -1318,10 +962,7 @@ export default function Speranza() {
           if (col.status !== "injured") return col;
           // IRON LUNGS: heals 2× faster
           const baseHeal = nurseCapacity > 0 ? (nurseCapacity--, HEAL_RATE_NURSE) : 1;
-          let healRate = col.traits?.includes("ironLungs") ? baseHeal * 2 : baseHeal;
-          // Quirk: workaholic heals 25% slower, insomniac heals 15% slower
-          if (col.quirk?.id === "workaholic")  healRate *= 0.75;
-          if (col.quirk?.id === "insomniac")   healRate *= 0.85;
+          const healRate = col.traits?.includes("ironLungs") ? baseHeal * 2 : baseHeal;
           const newTicks = (col.injuryTicksLeft ?? INJURY_TICKS_BASE) - healRate;
           if (newTicks <= 0) {
             addLog(`💊 ${col.name} has recovered and returned to duty.`);
@@ -1372,31 +1013,14 @@ export default function Speranza() {
         }
       }
 
-      // Check population = 0 → game over
-      setColonists(prev => {
-        if (prev.length === 0 && !gameOverRef.current) {
-          const currentTick = tickRef.current;
-          setGameOver({
-            reason: "All colonists lost — the colony is silent.",
-            daysAlive: Math.floor(currentTick / 48) + 1,
-            tick: currentTick,
-            raidsRepelled: raidsRepelledRef.current,
-            casualties: memorialRef.current,
-            peakPop: peakPopulation,
-          });
-        }
-        return prev;
-      });
+      // 5. XP accumulation ─────────────────────────────────────────────────
       // All living colonists age. On-duty colonists earn 1 XP per 10 duty ticks.
       // Level up every 20 XP → pendingTraitPick flag set.
       setColonists(prev => prev.map(col => {
         const onDuty   = col.status === "working" || col.status === "onSentry";
         const newAlive = (col.ticksAlive ?? 0) + 1;
-        // insomniac: dutyTicks always increments regardless of status
-        const newDuty  = (col.dutyTicks  ?? 0) + (onDuty || col.quirk?.id === "insomniac" ? 1 : 0);
-        // workaholic: gains XP every 8 ticks instead of 10
-        const xpInterval = col.quirk?.id === "workaholic" ? 8 : 10;
-        const newXp    = (col.xp ?? 0) + (onDuty && newDuty % xpInterval === 0 ? 1 : 0);
+        const newDuty  = (col.dutyTicks  ?? 0) + (onDuty ? 1 : 0);
+        const newXp    = (col.xp ?? 0) + (onDuty && newDuty % 10 === 0 ? 1 : 0);
         const newLevel = Math.floor(newXp / 20);
         const leveled  = newLevel > (col.level ?? 0);
         if (leveled) {
@@ -1429,7 +1053,6 @@ export default function Speranza() {
           if (def) {
             addLog(`⛏ ${def.label} excavation complete! ${def.discovery}`);
             addToast(`⛏ EXCAVATION COMPLETE\n${def.label} — Level unlocked!\n${def.discovery}`, "success");
-            addHistoryRef.current("⛏", `Excavation: ${def.label} unlocked`);
             // Row 2 discovery: +60 scrap
             if (rowIndex === 2) {
               setRes(prev => ({ ...prev, scrap: clamp(prev.scrap + 60, 0, MAX_RES) }));
@@ -1447,96 +1070,17 @@ export default function Speranza() {
         }
       });
 
-      if (heatSuppressedTicksRef.current > 0) {
-        setHeatSuppressedTicks(prev => Math.max(0, prev - 1));
-      }
-
-      {
-        const eventDeltas = moraleEventDeltasRef.current.splice(0, moraleEventDeltasRef.current.length);
-        eventDeltas.forEach(({ delta, reason }) => {
-          if (delta > 0) moraleTickBreakdown.plus.push(`${reason} +${delta.toFixed(1)}`);
-          if (delta < 0) moraleTickBreakdown.minus.push(`${reason} ${delta.toFixed(1)}`);
-          moraleTickBreakdown.net += delta;
-        });
-
-        const noResourceNotes = ["energy", "food", "water"].reduce((acc, key) => {
-          const b = resourceBreakdownSnapshot[key];
-          acc[key] = (b.plus.length === 0 && b.minus.length === 0)
-            ? { ...b, plus: ["No major modifiers this tick"] }
-            : b;
-          return acc;
-        }, {});
-
-        const finalMorale = (moraleTickBreakdown.plus.length === 0 && moraleTickBreakdown.minus.length === 0)
-          ? { ...moraleTickBreakdown, plus: ["No major modifiers this tick"] }
-          : moraleTickBreakdown;
-
-        setStatBreakdown({
-          energy: noResourceNotes.energy,
-          food: noResourceNotes.food,
-          water: noResourceNotes.water,
-          morale: finalMorale,
-        });
-      }
-
       setTick(t => {
         const next = t + 1;
-        // Track peak population
-        setPeakPopulation(prev => Math.max(prev, colonistsRef.current.length));
-        // Surface condition rotation — every 80-120 ticks (weighted random pick)
-        setSurfaceConditionTimer(prev => {
-          const nextTimer = prev + 1;
-          const rotateAt = 80 + Math.floor(Math.random() * 41); // 80-120
-          if (nextTimer >= rotateAt) {
-            const totalWeight = SURFACE_CONDITIONS.reduce((s, c) => s + c.weight, 0);
-            let r = Math.random() * totalWeight;
-            let next = SURFACE_CONDITIONS[0];
-            for (const cond of SURFACE_CONDITIONS) { r -= cond.weight; if (r <= 0) { next = cond; break; } }
-            setSurfaceCondition(next);
-            addLog(`🌍 SURFACE CONDITION: ${next.icon} ${next.label} — ${next.flavor}`);
-            playSurfaceCondition();
-            return 0;
-          }
-          return nextTimer;
-        });
-        // Dilemma event check — every 50 ticks, 40% chance if none active
-        setDilemmaTimer(prev => {
-          const nextDt = prev + 1;
-          if (nextDt >= 50 && !activeDilemma) {
-            if (Math.random() < 0.40) {
-              const currentTick = next;
-              const currentCond = surfaceConditionRef.current.id;
-              const popNow      = colonistsRef.current.length;
-              const eligible    = DILEMMA_EVENTS.filter(ev => {
-                if (firedDilemmasRef.current.includes(ev.id)) return false;
-                if (ev.minTick && currentTick < ev.minTick) return false;
-                if (ev.minPop  && popNow < ev.minPop)       return false;
-                if (ev.condition && ev.condition !== currentCond) return false;
-                return true;
-              });
-              if (eligible.length > 0) {
-                const picked = eligible[Math.floor(Math.random() * eligible.length)];
-                setActiveDilemma(picked);
-                setTimescale(0);
-                playDilemma();
-                setFiredDilemmas(p => [...p, picked.id]);
-                firedDilemmasRef.current = [...firedDilemmasRef.current, picked.id];
-              }
-            }
-            return 0;
-          }
-          return nextDt;
-        });
+        // Check time/morale/population milestones each tick
         checkMilestonesRef.current({
-          raidsRepelled:        raidsRepelledRef.current,
-          largeRaidsRepelled:   largeRaidsRepelledRef.current,
-          totalDeaths:          memorialRef.current.length,
+          raidsRepelled: raidsRepelledRef.current,
+          largeRaidsRepelled: largeRaidsRepelledRef.current,
+          memorial: memorialRef.current,
           expeditionsCompleted: expeditionsCompletedRef.current,
-          population:           colonistsRef.current.length,
-          day:                  Math.floor(next / 48) + 1,
-          morale:               moraleRef.current,
-          schematics:           surfaceHaulRef.current.schematics.length,
-          t3Built:              0,
+          colonists: colonistsRef.current,
+          tick: next,
+          morale: moraleRef.current,
         });
         return next;
       });
@@ -1546,19 +1090,19 @@ export default function Speranza() {
   }, [timescale]); // restart interval when timescale changes
 
   // ── Warnings — edge-triggered (only log on false→true transition) ─────────
-  const prevWarn = useRef({ food: false, water: false, energy: false, heat: false });
+  const prevWarn = useRef({ food: false, water: false, energy: false, threat: false });
   useEffect(() => {
     if (tick === 0) return;
     const cur = {
       food:   res.food   < 20,
       water:  res.water  < 20,
       energy: res.energy < 20,
-      heat:   heat > 600,  // HUNTED state
+      threat: threat > 350,   // 70% of THREAT_RAID_THRESHOLD (500)
     };
-    if (cur.food   && !prevWarn.current.food)   { addLog("⚠ FOOD CRITICAL");                         playAlert(); }
-    if (cur.water  && !prevWarn.current.water)  { addLog("⚠ WATER CRITICAL");                        playAlert(); }
-    if (cur.energy && !prevWarn.current.energy) { addLog("⚠ ENERGY CRITICAL");                       playAlert(); }
-    if (cur.heat   && !prevWarn.current.heat)   { addLog("🚨 ARC HEAT: HUNTED — raids will intensify!"); }
+    if (cur.food   && !prevWarn.current.food)   { addLog("⚠ FOOD CRITICAL");             playAlert(); }
+    if (cur.water  && !prevWarn.current.water)  { addLog("⚠ WATER CRITICAL");            playAlert(); }
+    if (cur.energy && !prevWarn.current.energy) { addLog("⚠ ENERGY CRITICAL");           playAlert(); }
+    if (cur.threat && !prevWarn.current.threat) { addLog("🚨 HIGH THREAT — Arc raid imminent!"); }
     prevWarn.current = cur;
   }, [tick]);
 
@@ -1572,7 +1116,6 @@ export default function Speranza() {
   // ── Actions ───────────────────────────────────────────────────────────────
   const handleCellClick = (r, c) => {
     if (gameOver) return;
-    playUiClick();
     setSelected({ r, c });
     setBuildMenu(!grid[r][c].type);
   };
@@ -1626,7 +1169,6 @@ export default function Speranza() {
     });
         addLog(`🏗 Built ${def.label} at sector [${r + 1}-${c + 1}]`);
         playBuild();
-    setHoveredBuildKey(null);
     setBuildMenu(false);
     setSelected(null);
   };
@@ -1651,7 +1193,6 @@ export default function Speranza() {
         return next;
       });
       addLog(`👤 ${pick.name} assigned to ${def.label}`);
-      playAssign();
     } else {
       // Unassign: find a colonist with the right status for this room
       if (cell.workers === 0) return;
@@ -1666,7 +1207,6 @@ export default function Speranza() {
         return next;
       });
       addLog(`👤 ${pick.name} stood down from ${def.label}`);
-      playUnassign();
     }
   };
 
@@ -1689,7 +1229,6 @@ export default function Speranza() {
       return next;
     });
     addLog(`💥 Demolished ${ROOM_TYPES[cell.type].label} at [${r + 1}-${c + 1}] (+5 scrap)`);
-    playDemolish();
     setSelected(null);
     setBuildMenu(false);
   };
@@ -1705,17 +1244,15 @@ export default function Speranza() {
       return next;
     });
     addLog(`🔧 ${ROOM_TYPES[cell.type].label} at [${r + 1}-${c + 1}] repaired. (-20 scrap)`);
-    playRepair();
   };
 
   const handleRecruit = () => {
     if (totalColonists >= popCap) { addLog("⚠ Pop cap reached — build more Barracks"); return; }
     if (res.food < 15 || res.water < 15) { addLog("⚠ Need 15 food + 15 water to recruit"); return; }
     setRes(prev => ({ ...prev, food: prev.food - 15, water: prev.water - 15 }));
-    const newCol = makeColonist(tickRef.current);
+    const newCol = makeColonist();
     setColonists(prev => [...prev, newCol]);
     addLog(`🧍 ${newCol.name} joined from surface survivors!`);
-    playRecruit();
   };
 
   const handleUnlockTech = (techKey) => {
@@ -1733,47 +1270,27 @@ export default function Speranza() {
   const handlePickTrait = (colonistId, traitKey) => {
     const trait = TRAITS[traitKey];
     if (!trait) return;
-    const target = colonists.find(c => c.id === colonistId);
-    if (!target || target.traits.includes(traitKey)) return;
     setColonists(prev => prev.map(col => {
       if (col.id !== colonistId) return col;
+      if (col.traits.includes(traitKey)) return col;
       const newTraits = [...col.traits, traitKey];
+      addLog(`${trait.icon} ${col.name} gained trait: ${trait.label}`);
+      addToast(`${trait.icon} TRAIT ACQUIRED\n${col.name} — ${trait.label}\n${trait.desc}`, "success");
       return { ...col, traits: newTraits, pendingTraitPick: false };
     }));
-    addLog(`${trait.icon} ${target.name} gained trait: ${trait.label}`);
-    addToast(`${trait.icon} TRAIT ACQUIRED\n${target.name} — ${trait.label}\n${trait.desc}`, "success", {
-      key: `trait-${colonistId}-${traitKey}`,
-      dedupeMs: 3000,
-    });
-    playLevelUp();
   };
 
   const handleLaunchExpedition = (type) => {
     if (expeditions.length >= 2) { addLog("⚠ Maximum 2 expeditions active at once"); return; }
-    // Surface condition may block expeditions (e.g. dust storm)
-    if (surfaceCondition.effects.expedBlocked) {
-      addLog(`⚠ Expeditions blocked — ${surfaceCondition.icon} ${surfaceCondition.label}`);
-      return;
-    }
     const def = EXPEDITION_TYPES[type];
-    // tunnelBlind quirk: excluded from expeditions
-    const idle = colonists.filter(c => c.status === "idle" && c.quirk?.id !== "tunnelBlind");
-    const allIdle = colonists.filter(c => c.status === "idle");
-    if (allIdle.length < def.colonistsRequired) {
-      addLog(`⚠ Need ${def.colonistsRequired} free colonist(s) — only ${allIdle.length} available`);
-      return;
-    }
+    const idle = colonists.filter(c => c.status === "idle");
     if (idle.length < def.colonistsRequired) {
-      addLog(`⚠ All available colonists are Tunnel-Blind — cannot go topside`);
+      addLog(`⚠ Need ${def.colonistsRequired} free colonist(s) — only ${idle.length} available`);
       return;
     }
     const picked   = idle.slice(0, def.colonistsRequired);
     const names    = picked.map(c => c.name).join(" & ");
     const rollEvery = type === "scav" ? 8 : 6;
-    // surfaceBorn: +20% good roll weight; packRat: bonus scrap+salvage tracked on expedition
-    const hasSurfaceBorn = picked.some(c => c.quirk?.id === "surfaceBorn");
-    const hasPackRat     = picked.some(c => c.quirk?.id === "packRat");
-    const hasLoudmouth   = picked.some(c => c.quirk?.id === "loudmouth");
     const newExp = {
       id: `exp-${Date.now()}`,
       type,
@@ -1785,88 +1302,14 @@ export default function Speranza() {
       eventLog:        [],
       lootAccumulated: { scrap: 0, salvage: 0, arcTech: 0, survivor: false },
       moraleSnapshot:  morale,
-      conditionSnapshot: { ...surfaceCondition },
-      quirkBonuses:    { surfaceBorn: hasSurfaceBorn, packRat: hasPackRat, loudmouth: hasLoudmouth },
     };
     setColonists(prev =>
       prev.map(c => picked.find(p => p.id === c.id) ? { ...c, status: "onExpedition" } : c)
     );
-    setHeat(t => clamp(t + (heatSuppressedTicksRef.current > 0 ? 0 : def.threatDelta), 0, HEAT_MAX));
+    setThreat(t => clamp(t + def.threatDelta, 0, THREAT_RAID_THRESHOLD));
     setExpeditions(prev => [...prev, newExp]);
     addLog(`${def.icon} ${names} deployed on ${def.label} (${expedDuration}t). ~${Math.floor(expedDuration / rollEvery)} rolls expected.`);
     playExpedition();
-  };
-
-  const handleDilemmaChoice = (choice) => {
-    const a = choice.apply ?? {};
-    const outcomeBits = [];
-    if (a.morale)       changeMoraleRef.current(a.morale, `dilemma: ${activeDilemma?.id}`);
-    if (a.morale)       outcomeBits.push(`Morale ${a.morale > 0 ? "+" : ""}${a.morale}`);
-    if (a.scrap)        setRes(p => ({ ...p, scrap:   clamp(p.scrap   + a.scrap,   0, MAX_RES) }));
-    if (a.scrap)        outcomeBits.push(`Scrap ${a.scrap > 0 ? "+" : ""}${a.scrap}`);
-    if (a.food)         setRes(p => ({ ...p, food:    clamp(p.food    + a.food,    0, MAX_RES) }));
-    if (a.food)         outcomeBits.push(`Food ${a.food > 0 ? "+" : ""}${a.food}`);
-    if (a.water)        setRes(p => ({ ...p, water:   clamp(p.water   + a.water,   0, MAX_RES) }));
-    if (a.water)        outcomeBits.push(`Water ${a.water > 0 ? "+" : ""}${a.water}`);
-    if (a.arcTech)      setSurfaceHaul(p => ({ ...p, arcTech:  p.arcTech  + a.arcTech  }));
-    if (a.arcTech)      outcomeBits.push(`Arc Tech +${a.arcTech}`);
-    if (a.salvage)      setSurfaceHaul(p => ({ ...p, salvage:  p.salvage  + a.salvage  }));
-    if (a.salvage)      outcomeBits.push(`Salvage +${a.salvage}`);
-    if (a.heatDelta)    setHeat(p => clamp(p + a.heatDelta, 0, HEAT_MAX));
-    if (a.heatDelta)    outcomeBits.push(`Heat ${a.heatDelta > 0 ? "+" : ""}${a.heatDelta}`);
-    if (a.suppressHeatTicks) setHeatSuppressedTicks(a.suppressHeatTicks);
-    if (a.suppressHeatTicks) outcomeBits.push(`Heat suppressed ${a.suppressHeatTicks}t`);
-    if (a.recruitFree)  setColonists(p => [...p, makeColonist(tickRef.current)]);
-    if (a.recruitFree)  outcomeBits.push("1 colonist joined");
-    if (a.removeRandomColonist) {
-      setColonists(prev => {
-        const pool = prev.filter(c => c.status !== "onExpedition");
-        if (pool.length === 0) return prev;
-        const target = pool[Math.floor(Math.random() * pool.length)];
-        addToMemorialRef.current(target, "moraleDeath", tickRef.current);
-        return prev.filter(c => c.id !== target.id);
-      });
-      outcomeBits.push("1 colonist lost");
-    }
-    if (a.injureRandom) {
-      setColonists(prev => {
-        const pool = prev.filter(c => c.status === "idle" || c.status === "working");
-        if (pool.length === 0) return prev;
-        const target = pool[Math.floor(Math.random() * pool.length)];
-        return prev.map(c => c.id === target.id ? { ...c, status: "injured", injuryTicksLeft: 20, injuryCount: (c.injuryCount ?? 0) + 1 } : c);
-      });
-      outcomeBits.push("1 colonist injured");
-    }
-    if (a.schematicRandom) {
-      const allSch = ["turretSchematics","empSchematics","fortSchematics","geoSchematics","researchSchematics"];
-      const owned  = surfaceHaulRef.current.schematics;
-      const avail  = allSch.filter(s => !owned.includes(s));
-      if (avail.length > 0) {
-        const found = avail[Math.floor(Math.random() * avail.length)];
-        setSurfaceHaul(p => ({ ...p, schematics: [...p.schematics, found] }));
-        addLog(`📋 Schematic recovered: ${found}`);
-        outcomeBits.push(`Schematic: ${found}`);
-      }
-    }
-    const outcomeSummary = outcomeBits.length > 0 ? outcomeBits.join(" · ") : "No immediate effect.";
-    setRecentDilemmaOutcomes(prev => [
-      {
-        id: `d-${Date.now()}-${Math.random()}`,
-        tick: tickRef.current,
-        title: activeDilemma?.title ?? activeDilemma?.id ?? "Dilemma",
-        choice: choice.label,
-        summary: outcomeSummary,
-      },
-      ...prev,
-    ].slice(0, 8));
-    addToast(`📋 DILEMMA RESOLVED\n${choice.label}\n${outcomeSummary}`, "info", {
-      key: `dilemma-${activeDilemma?.id}-${choice.label}-${tickRef.current}`,
-      dedupeMs: 200,
-    });
-    addLog(`📋 ${activeDilemma?.id}: "${choice.label}" — ${choice.outcome}`);
-    addHistoryRef.current("📋", `Dilemma: ${(activeDilemma?.title ?? activeDilemma?.id ?? "event").replace(/_/g, " ")} → ${choice.label}`);
-    playDilemmaResolve();
-    setActiveDilemma(null);
   };
 
   const handleSoundAlarm = () => {
@@ -1877,7 +1320,6 @@ export default function Speranza() {
     setGrid(prev => prev.map(row => row.map(cell => ({ ...cell, workers: 0 }))));
     addLog("🏠 ALARM SOUNDED — colonists sheltering. Production halted.");
     addToast("🏠 ALARM SOUNDED\nColonists are sheltering.\nThey are immune to Arc strikes.", "info");
-    playShelterAlarm();
   };
 
   const handleBackToWork = () => {
@@ -1893,7 +1335,7 @@ export default function Speranza() {
     setGrid(initGrid());
     setRes(INIT_RES);
     setColonists(initColonists());
-    setHeat(0);
+    setThreat(15);
     setExpeditions([]);
     setExpedDuration(40);
     setRaidWindow(null);
@@ -1915,66 +1357,15 @@ export default function Speranza() {
     setRaidsRepelled(0);
     setLargeRaidsRepelled(0);
     setExpeditionsCompleted(0);
-    setSurfaceCondition(SURFACE_CONDITIONS[0]);
-    setSurfaceConditionTimer(0);
-    setPeakPopulation(3);
-    setActiveDilemma(null);
-    setDilemmaTimer(0);
-    setFiredDilemmas([]);
-    setHistoryLog([]);
-    raidSuppressedThisRaidRef.current = 0;
   };
 
   // ── Derived UI ────────────────────────────────────────────────────────────
-  const selCell       = selected ? grid[selected.r][selected.c] : null;
-  const armoryArmed   = grid.flatMap(r => r).some(c => c.type === "armory" && c.workers > 0);
+  const selCell      = selected ? grid[selected.r][selected.c] : null;
+  const armoryArmed  = grid.flatMap(r => r).some(c => c.type === "armory" && c.workers > 0);
   const hasRadioTower = grid.flatMap(r => r).some(c => c.type === "radioTower");
-  const radioTowerOnline = hasRadioTower && !surfaceCondition.effects.radioOffline;
-  const heatState     = getHeatState(heat);
-  const heatPct       = (heat / HEAT_MAX) * 100;
-  const shelteredCount = colonists.filter(c => c.status === "sheltered").length;
-  const memorialHallBuilt = grid.flatMap(r => r).some(c => c.type === "memorial");
-
-  const SKY_STOPS = [
-    { t: 0.00, top: "#020510", bottom: "#020510" },
-    { t: 0.18, top: "#060818", bottom: "#0d0f1e" },
-    { t: 0.22, top: "#1a0a0a", bottom: "#4a1a08" },
-    { t: 0.27, top: "#2a1505", bottom: "#c85020" },
-    { t: 0.33, top: "#1a2030", bottom: "#d4601a" },
-    { t: 0.42, top: "#0d1828", bottom: "#2a4a6a" },
-    { t: 0.50, top: "#0a1520", bottom: "#1a3048" },
-    { t: 0.58, top: "#0d1828", bottom: "#2a4a5a" },
-    { t: 0.67, top: "#1a1008", bottom: "#c06020" },
-    { t: 0.73, top: "#1a0808", bottom: "#601008" },
-    { t: 0.80, top: "#080510", bottom: "#120818" },
-    { t: 1.00, top: "#020510", bottom: "#020510" },
-  ];
-
-  function lerpHex(a, b, t) {
-    const ah = a.replace("#", "");
-    const bh = b.replace("#", "");
-    const ar = parseInt(ah.slice(0, 2), 16);
-    const ag = parseInt(ah.slice(2, 4), 16);
-    const ab = parseInt(ah.slice(4, 6), 16);
-    const br = parseInt(bh.slice(0, 2), 16);
-    const bg = parseInt(bh.slice(2, 4), 16);
-    const bb = parseInt(bh.slice(4, 6), 16);
-    return `#${Math.round(ar + (br - ar) * t).toString(16).padStart(2, "0")}${Math.round(ag + (bg - ag) * t).toString(16).padStart(2, "0")}${Math.round(ab + (bb - ab) * t).toString(16).padStart(2, "0")}`;
-  }
-
-  const dayFraction = (tick % 48) / 48;
-  let skyA = SKY_STOPS[0], skyB = SKY_STOPS[1];
-  for (let i = 0; i < SKY_STOPS.length - 1; i++) {
-    if (dayFraction >= SKY_STOPS[i].t && dayFraction <= SKY_STOPS[i + 1].t) {
-      skyA = SKY_STOPS[i];
-      skyB = SKY_STOPS[i + 1];
-      break;
-    }
-  }
-  const span = skyB.t - skyA.t;
-  const local = span === 0 ? 0 : (dayFraction - skyA.t) / span;
-  const skyTop = lerpHex(skyA.top, skyB.top, local);
-  const skyBottom = lerpHex(skyA.bottom, skyB.bottom, local);
+  const threatPct    = threat / THREAT_RAID_THRESHOLD * 100;
+  const threatColor = raidWindow ? "#ff4444" : threatPct < 40 ? "#7ed321" : threatPct < 70 ? "#f5a623" : "#ff4444";
+  const threatLabel = threatPct < 40 ? "LOW" : threatPct < 70 ? "ELEVATED" : threatPct < 90 ? "HIGH" : "CRITICAL";
 
   // ── Render helpers ────────────────────────────────────────────────────────
   const ResBar = ({ k, icon, label, color }) => (
@@ -1993,138 +1384,21 @@ export default function Speranza() {
   // ── JSX ───────────────────────────────────────────────────────────────────
   return (
     <div onClick={handleFirstInteraction} style={{
-      minHeight: "100vh", background: "transparent", color: "#c8d0d8",
-      position: "relative",
+      minHeight: "100vh", background: "#050508", color: "#c8d0d8",
       fontFamily: "'Courier New', monospace",
       display: "flex", flexDirection: "column", alignItems: "center",
       padding: "14px 8px",
+      backgroundImage: "radial-gradient(ellipse at 50% 0%, #0d1520 0%, #050508 60%)",
       outline: raidFlash ? "3px solid #ff4444" : "3px solid transparent",
       transition: "outline 0.15s",
     }}>
 
-      {/* Sky background — day/night cycle, sits behind all UI */}
-      <div style={{
-        position: "fixed",
-        top: 0, left: 0, right: 0,
-        height: "55vh",
-        background: `linear-gradient(to bottom, ${skyTop} 0%, ${skyBottom} 100%)`,
-        zIndex: 0,
-        pointerEvents: "none",
-        transition: "background 2s ease",
-      }} />
-      {/* Stars — visible at night */}
-      {(() => {
-        const isNight = dayFraction < 0.18 || dayFraction > 0.78;
-        const starOpacity = dayFraction < 0.18
-          ? 1 - (dayFraction / 0.18)
-          : dayFraction > 0.78
-          ? (dayFraction - 0.78) / 0.22
-          : 0;
-        if (!isNight) return null;
-        return (
-          <div style={{
-            position: "fixed", top: 0, left: 0, right: 0, height: "45vh",
-            zIndex: 0, pointerEvents: "none", opacity: starOpacity,
-            transition: "opacity 3s ease",
-          }}>
-            {[...Array(40)].map((_, i) => (
-              <div key={i} style={{
-                position: "absolute",
-                left: `${(i * 37 + 11) % 100}%`,
-                top: `${(i * 23 + 7) % 80}%`,
-                width: i % 4 === 0 ? 2 : 1,
-                height: i % 4 === 0 ? 2 : 1,
-                borderRadius: "50%",
-                background: "#ffffff",
-                opacity: 0.6 + (i % 3) * 0.2,
-                animation: `twinkle ${2 + (i % 3)}s ease-in-out infinite alternate`,
-                animationDelay: `${(i * 0.3) % 3}s`,
-              }} />
-            ))}
-          </div>
-        );
-      })()}
-
-      {/* Sun / Moon arc */}
-      {(() => {
-        const angle = dayFraction * Math.PI * 2 - Math.PI / 2;
-        const isSunVisible = dayFraction > 0.18 && dayFraction < 0.80;
-        const isMoonVisible = dayFraction < 0.20 || dayFraction > 0.76;
-
-        // Arc across top 40% of screen
-        const xPct = 50 + Math.cos(angle) * 42;
-        const yPct = 38 + Math.sin(angle) * 32; // keeps it in top portion
-
-        // Sun color shifts through day
-        const sunColor = dayFraction < 0.27 ? "#c84010"
-          : dayFraction < 0.33 ? "#f5a030"
-          : dayFraction < 0.67 ? "#f5d060"
-          : dayFraction < 0.73 ? "#f08020"
-          : "#c03010";
-
-        const moonAngle = angle + Math.PI;
-        const moonX = 50 + Math.cos(moonAngle) * 42;
-        const moonY = 38 + Math.sin(moonAngle) * 32;
-
-        return (
-          <div style={{
-            position: "fixed", top: 0, left: 0, right: 0, height: "45vh",
-            zIndex: 0, pointerEvents: "none",
-          }}>
-            {/* Sun */}
-            {isSunVisible && yPct < 95 && (
-              <div style={{
-                position: "absolute",
-                left: `${xPct}%`,
-                top: `${yPct}%`,
-                transform: "translate(-50%, -50%)",
-                width: 22, height: 22,
-                borderRadius: "50%",
-                background: sunColor,
-                boxShadow: `0 0 30px 8px ${sunColor}88, 0 0 60px 20px ${sunColor}44`,
-                transition: "background 2s ease, box-shadow 2s ease",
-                opacity: isSunVisible ? 1 : 0,
-              }} />
-            )}
-            {/* Moon */}
-            {isMoonVisible && moonY < 95 && moonY > 5 && (
-              <div style={{
-                position: "absolute",
-                left: `${moonX}%`,
-                top: `${moonY}%`,
-                transform: "translate(-50%, -50%)",
-                width: 16, height: 16,
-                borderRadius: "50%",
-                background: "#c8d4e0",
-                boxShadow: "0 0 16px 4px #c8d4e066, 0 0 30px 10px #c8d4e033",
-              }} />
-            )}
-          </div>
-        );
-      })()}
-      {/* Fade to dark below so grid area stays dark */}
-      <div style={{
-        position: "fixed",
-        top: "40vh", left: 0, right: 0,
-        height: "20vh",
-        background: "linear-gradient(to bottom, transparent, #030609)",
-        zIndex: 0,
-        pointerEvents: "none",
-      }} />
-
       {/* ── HEADER ── */}
-      <div style={{ width: "100%", maxWidth: 920, marginBottom: 10, position: "relative", zIndex: 1 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", borderBottom: "1px solid #1e3a5f", paddingBottom: 8, marginBottom: 10, flexWrap: "wrap", gap: 8, background: "rgba(3,6,9,0.55)", backdropFilter: "blur(2px)" }}>
+      <div style={{ width: "100%", maxWidth: 920, marginBottom: 10 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", borderBottom: "1px solid #1e3a5f", paddingBottom: 8, marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
           <div>
             <div style={{ fontSize: 20, fontWeight: "bold", color: "#4ab3f4", letterSpacing: 3 }}>⛩ SPERANZA</div>
             <div style={{ fontSize: 9, color: "#2a4a6a", letterSpacing: 2 }}>UNDERGROUND COLONY · {tickToDayHour(tick)}</div>
-            {/* Surface condition badge */}
-            <div style={{ marginTop: 3, display: "inline-flex", alignItems: "center", gap: 5,
-              background: "#0a0c14", border: `1px solid ${surfaceCondition.color}44`,
-              borderRadius: 4, padding: "2px 8px" }}>
-              <span style={{ fontSize: 10 }}>{surfaceCondition.icon}</span>
-              <span style={{ fontSize: 8, color: surfaceCondition.color, letterSpacing: 1 }}>{surfaceCondition.label}</span>
-            </div>
             {/* Timescale controls */}
             <div style={{ display: "flex", gap: 3, marginTop: 5, alignItems: "center" }}>
               {[{ v: 0, label: "⏸" }, { v: 0.5, label: ".5×" }, { v: 1, label: "1×" }, { v: 2, label: "2×" }, { v: 4, label: "4×" }, { v: 10, label: "10×" }].map(({ v, label }) => (
@@ -2136,77 +1410,45 @@ export default function Speranza() {
                   fontWeight: timescale === v ? "bold" : "normal",
                 }}>{label}</button>
               ))}
-              <div style={{
-                display: "flex", alignItems: "center", gap: 5,
-                marginLeft: 6, padding: "2px 6px",
-                background: "#0a0c14", border: "1px solid #1a2535", borderRadius: 3,
-              }}>
-                <span style={{ color: "#4ab3f4", fontSize: 10 }}>🔊</span>
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  step="1"
-                  value={musicVolume}
-                  onChange={handleMusicVolumeChange}
-                  style={{ width: 72, accentColor: "#4ab3f4", cursor: "pointer" }}
-                />
-                <span style={{ color: "#4ab3f4", fontSize: 9, minWidth: 28, textAlign: "right" }}>{musicVolume}%</span>
-              </div>
-              <button
-                title="Toggle Colony Log"
-                onClick={(e) => { e.stopPropagation(); setJournalOpen(v => !v); }}
-                style={{
-                  background: journalOpen ? "#1a3a5a" : "#0a0c14",
-                  border: `1px solid ${journalOpen ? "#4ab3f4" : "#1a2535"}`,
-                  borderRadius: 3, color: journalOpen ? "#4ab3f4" : "#2a4a6a",
-                  padding: "2px 6px", cursor: "pointer", fontSize: 10, fontFamily: "monospace",
-                  marginLeft: 4,
-                }}
-              >📜</button>
-              <button
-                title="Toggle Colony Effects"
-                onClick={(e) => { e.stopPropagation(); setEffectsOpen(v => !v); }}
-                style={{
-                  background: effectsOpen ? "#2a2410" : "#0a0c14",
-                  border: `1px solid ${effectsOpen ? "#d4a843" : "#1a2535"}`,
-                  borderRadius: 3, color: effectsOpen ? "#d4a843" : "#2a4a6a",
-                  padding: "2px 6px", cursor: "pointer", fontSize: 10, fontFamily: "monospace",
-                  marginLeft: 2,
-                }}
-              >🧪</button>
+              <button onClick={(e) => { e.stopPropagation(); toggleMute(); }} style={{
+                background: "#0a0c14",
+                border: `1px solid ${isMuted ? "#5a2a2a" : "#1a2535"}`,
+                borderRadius: 3, color: isMuted ? "#884444" : "#4ab3f4",
+                padding: "2px 6px", cursor: "pointer", fontSize: 11, fontFamily: "monospace",
+                marginLeft: 4,
+              }}>{isMuted ? "🔇" : "🔊"}</button>
               {timescale === 0 && (
                 <span style={{ color: "#f5a623", fontSize: 8, marginLeft: 3, letterSpacing: 1 }}>PAUSED</span>
               )}
             </div>
           </div>
 
-          {/* Heat meter */}
+          {/* Threat meter */}
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, minWidth: 180 }}>
-            <div style={{ fontSize: 9, color: raidWindow ? "#ff4444" : heatState.color, letterSpacing: 2, fontWeight: "bold" }}>
-              ☢ ARC HEAT: {raidWindow ? `⚠ RAID INCOMING` : heatState.label}
+            <div style={{ fontSize: 9, color: threatColor, letterSpacing: 2, fontWeight: "bold" }}>
+              ☢ ARC THREAT: {raidWindow ? `⚠ RAID WINDOW OPEN` : `${threatLabel} (${Math.floor(threat / THREAT_RAID_THRESHOLD * 100)}%)`}
             </div>
             <div style={{ width: "100%", height: 10, background: "#0d1020", borderRadius: 5, overflow: "hidden" }}>
               <div style={{
                 height: "100%",
-                width: raidWindow ? "100%" : `${heatPct}%`,
+                width: raidWindow ? "100%" : `${(threat / THREAT_RAID_THRESHOLD) * 100}%`,
                 background: raidWindow
                   ? `repeating-linear-gradient(90deg, #ff2222 0px, #ff4444 8px, #880000 8px, #880000 16px)`
-                  : `linear-gradient(90deg, #1a5a1a, ${heatState.color})`,
-                boxShadow: (raidWindow || heat > 600) ? `0 0 10px #ff4444` : "none",
+                  : `linear-gradient(90deg, #1a5a1a, ${threatColor})`,
+                boxShadow: (raidWindow || threat / THREAT_RAID_THRESHOLD > 0.7) ? `0 0 10px #ff4444` : "none",
                 transition: raidWindow ? "none" : "width 0.5s, background 0.5s",
               }} />
             </div>
             {raidWindow ? (
               <div style={{ fontSize: 8, color: "#ff4444", letterSpacing: 1, fontWeight: "bold" }}>
-                {radioTowerOnline
+                {hasRadioTower
                   ? `${RAID_SIZES[RAID_SIZE_ORDER[raidWindow.sizeIdx]].icon} ${RAID_SIZES[RAID_SIZE_ORDER[raidWindow.sizeIdx]].label} RAID INCOMING — rolling each tick`
                   : "❓ UNKNOWN RAID INCOMING — rolling each tick"}
-                {radioTowerOnline && unlockedTechs.includes("barricades") && ` · 🛡 ${Math.round({ small:75, medium:30, large:10 }[RAID_SIZE_ORDER[raidWindow.sizeIdx]])}% block`}
+                {hasRadioTower && unlockedTechs.includes("barricades") && ` · 🛡 ${Math.round({ small:75, medium:30, large:10 }[RAID_SIZE_ORDER[raidWindow.sizeIdx]])}% block`}
               </div>
             ) : (
               <div style={{ fontSize: 8, color: "#2a4a6a" }}>
-                {Math.floor(heat)}/1000 · {Math.round(HEAT_RAID_PROB_BASE * 100 + (heat / HEAT_MAX) * HEAT_RAID_PROB_SCALE * 100)}% raid chance/day
+                Each building +0.8 threat/tick · raids scale with colony size
                 {unlockedTechs.includes("barricades") && " · 🛡 Barricades active"}
               </div>
             )}
@@ -2224,10 +1466,7 @@ export default function Speranza() {
                 <div style={{ fontSize: 9, color: moraleColor, letterSpacing: 2, fontWeight: "bold" }}>
                   🧭 MORALE: {moraleTier}
                 </div>
-                <div
-                  onMouseEnter={() => setHoveredFlowStat("morale")}
-                  onMouseLeave={() => setHoveredFlowStat(null)}
-                  style={{ width: "100%", height: 10, background: "#0d1020", borderRadius: 5, overflow: "hidden", position: "relative" }}>
+                <div style={{ width: "100%", height: 10, background: "#0d1020", borderRadius: 5, overflow: "hidden", position: "relative" }}>
                   {/* Center divider */}
                   <div style={{ position: "absolute", left: "50%", top: 0, width: 1, height: "100%", background: "#2a3545", zIndex: 2 }} />
                   {/* Positive half (right of center) */}
@@ -2333,17 +1572,17 @@ export default function Speranza() {
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
               <div>
                 <div style={{ color: "#ff6622", fontSize: 13, fontWeight: "bold", letterSpacing: 2 }}>
-                  {radioTowerOnline
+                  {hasRadioTower
                     ? `${RAID_SIZES[RAID_SIZE_ORDER[raidWindow.sizeIdx]].icon} ${RAID_SIZES[RAID_SIZE_ORDER[raidWindow.sizeIdx]].label} RAID INCOMING`
                     : "❓ UNKNOWN RAID INCOMING"}
                 </div>
                 <div style={{ color: "#7a3a1a", fontSize: 9, marginTop: 3, letterSpacing: 1 }}>
                   Arc forces mobilizing — {Math.round(RAID_LAUNCH_CHANCE * 100)}% strike chance each tick
                   {raidWindow.escalations > 0 && ` · escalated ${raidWindow.escalations}×`}
-                  {!radioTowerOnline && " · 📡 build/restore Radio Tower to identify"}
+                  {!hasRadioTower && " · 📡 build Radio Tower to identify"}
                 </div>
               </div>
-              {radioTowerOnline && unlockedTechs.includes("barricades") && (
+              {hasRadioTower && unlockedTechs.includes("barricades") && (
                 <div style={{ color: "#4a8a4a", fontSize: 9, letterSpacing: 1 }}>
                   🛡 {Math.round({ small: 75, medium: 30, large: 10 }[RAID_SIZE_ORDER[raidWindow.sizeIdx]])}% block chance
                 </div>
@@ -2392,287 +1631,43 @@ export default function Speranza() {
       ))}
 
       {/* ── GAME OVER ── */}
-      {gameOver && (() => {
-        const days = gameOver.daysAlive ?? 1;
-        const grade = days >= 80 ? "LEGEND" : days >= 40 ? "DEFENDER" : days >= 20 ? "SURVIVOR" : "LOST";
-        const gradeColor = { LEGEND: "#ffd700", DEFENDER: "#4ab3f4", SURVIVOR: "#7ed321", LOST: "#ff4444" }[grade];
-        const runCode = "SPZ-" + btoa(JSON.stringify({ d: days, r: gameOver.raidsRepelled, k: gameOver.casualties?.length ?? 0 })).slice(0, 8).toUpperCase();
-        return (
-          <div style={{
-            position: "fixed", inset: 0, background: "#000000cc", zIndex: 9000,
-            display: "flex", alignItems: "center", justifyContent: "center",
-          }}>
-            <div style={{
-              background: "#07090f", border: "2px solid #ff3333", borderRadius: 12,
-              padding: "32px 40px", maxWidth: 520, width: "90%", maxHeight: "85vh", overflowY: "auto",
-              boxShadow: "0 0 60px #ff000044",
-            }}>
-              {/* Grade */}
-              <div style={{ textAlign: "center", marginBottom: 20 }}>
-                <div style={{ fontSize: 36, marginBottom: 6 }}>💀</div>
-                <div style={{ fontSize: 28, fontWeight: "bold", color: gradeColor, letterSpacing: 4, marginBottom: 4 }}>
-                  {grade}
-                </div>
-                <div style={{ fontSize: 10, color: "#445566", letterSpacing: 2 }}>COLONY DESIGNATION: SPERANZA</div>
-              </div>
-
-              {/* Reason */}
-              <div style={{ background: "#1a0808", border: "1px solid #ff333344", borderRadius: 6, padding: "10px 14px", marginBottom: 16, textAlign: "center" }}>
-                <div style={{ color: "#ff6666", fontSize: 11, letterSpacing: 1 }}>{gameOver.reason}</div>
-              </div>
-
-              {/* Stats grid */}
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 16 }}>
-                {[
-                  ["DAYS SURVIVED",   days],
-                  ["RAIDS REPELLED",  gameOver.raidsRepelled ?? 0],
-                  ["COLONISTS LOST",  gameOver.casualties?.length ?? 0],
-                  ["PEAK POPULATION", gameOver.peakPop ?? 0],
-                ].map(([label, val]) => (
-                  <div key={label} style={{ background: "#0a0c18", border: "1px solid #1a2535", borderRadius: 6, padding: "8px 12px" }}>
-                    <div style={{ color: "#2a4a6a", fontSize: 8, letterSpacing: 1, marginBottom: 3 }}>{label}</div>
-                    <div style={{ color: "#c8d8e8", fontSize: 20, fontWeight: "bold" }}>{val}</div>
-                  </div>
-                ))}
-              </div>
-
-              {/* Casualties */}
-              {(gameOver.casualties?.length > 0) && (
-                <div style={{ marginBottom: 16 }}>
-                  <div style={{ color: "#7a6a4a", fontSize: 9, letterSpacing: 2, marginBottom: 6, borderBottom: "1px solid #2a1a0a", paddingBottom: 4 }}>
-                    🕯 FALLEN COLONISTS
-                  </div>
-                  <div style={{ maxHeight: 120, overflowY: "auto" }}>
-                    {gameOver.casualties.map((entry, i) => (
-                      <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", borderBottom: "1px solid #0d1020", fontSize: 9 }}>
-                        <span style={{ color: "#c8d0d8" }}>{entry.name} <span style={{ color: "#555" }}>LVL {entry.level}</span></span>
-                        <span style={{ color: "#8a5a3a" }}>
-                          {entry.cause === "raidKilled" ? "killed in raid" :
-                           entry.cause === "expeditionKilled" ? "lost topside" :
-                           entry.cause === "raidFled" ? "fled" : "left"}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Colony history timeline */}
-              {historyLog.length > 0 && (
-                <div style={{ marginBottom: 16 }}>
-                  <div style={{ color: "#7a6a4a", fontSize: 9, letterSpacing: 2, marginBottom: 6, borderBottom: "1px solid #2a1a0a", paddingBottom: 4 }}>
-                    📜 COLONY TIMELINE
-                  </div>
-                  <div style={{ maxHeight: 140, overflowY: "auto" }}>
-                    {historyLog.map((ev, i) => (
-                      <div key={i} style={{ display: "flex", gap: 8, padding: "3px 0", borderBottom: "1px solid #0d1020", fontSize: 9 }}>
-                        <span style={{ color: "#445566", minWidth: 42, flexShrink: 0 }}>Day {ev.day}</span>
-                        <span style={{ fontSize: 10 }}>{ev.icon}</span>
-                        <span style={{ color: "#8899aa" }}>{ev.text}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Run code */}
-              <div style={{ textAlign: "center", marginBottom: 20 }}>
-                <div style={{ color: "#2a4a6a", fontSize: 8, letterSpacing: 2, marginBottom: 4 }}>RUN CODE</div>
-                <div style={{ background: "#0a0c14", border: "1px solid #1a3040", borderRadius: 4, padding: "6px 14px", display: "inline-block" }}>
-                  <span style={{ color: "#4ab3f4", fontSize: 12, fontFamily: "monospace", letterSpacing: 2 }}>{runCode}</span>
-                  <button onClick={() => navigator.clipboard?.writeText(runCode)} style={{ marginLeft: 10, background: "none", border: "none", cursor: "pointer", color: "#2a5a7a", fontSize: 9 }}>COPY</button>
-                </div>
-              </div>
-
-              <button onClick={handleRestart} style={{
-                width: "100%", background: "#1a0000", border: "2px solid #ff3333",
-                borderRadius: 6, color: "#ff6666", padding: "12px", cursor: "pointer",
-                fontSize: 12, letterSpacing: 3, fontFamily: "monospace",
-              }}>NEW COLONY</button>
-            </div>
-          </div>
-        );
-      })()}
-
-      {/* ── DILEMMA MODAL ── */}
-      {activeDilemma && (
-        <div style={{
-          position: "fixed", inset: 0, background: "#000000bb", zIndex: 8000,
-          display: "flex", alignItems: "center", justifyContent: "center",
-        }}>
-          <div style={{
-            background: "#080b14", border: "2px solid #4a3a6a", borderRadius: 10,
-            padding: "28px 32px", maxWidth: 440, width: "90%",
-            boxShadow: "0 0 40px #4a3a6a55",
-          }}>
-            <div style={{ fontSize: 9, color: "#4a3a6a", letterSpacing: 3, marginBottom: 8 }}>SITUATION REPORT</div>
-            <div style={{ fontSize: 14, color: "#c8b8e8", fontWeight: "bold", letterSpacing: 1, marginBottom: 14 }}>
-              {activeDilemma.title ?? activeDilemma.id.replace(/_/g, " ").toUpperCase()}
-            </div>
-            <div style={{ color: "#7a8a9a", fontSize: 10, lineHeight: 1.7, marginBottom: 20, fontStyle: "italic", borderLeft: "2px solid #2a2a4a", paddingLeft: 12 }}>
-              {activeDilemma.text}
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {(activeDilemma.choices ?? []).map((choice, i) => (
-                <button key={i} onClick={() => handleDilemmaChoice(choice)} style={{
-                  background: "#0a0c18", border: "1px solid #2a2a5a",
-                  borderRadius: 6, color: "#aab8cc", padding: "10px 14px",
-                  cursor: "pointer", textAlign: "left", fontSize: 10, lineHeight: 1.5,
-                  fontFamily: "monospace",
-                  transition: "border-color 0.15s",
-                }}
-                  onMouseEnter={e => e.currentTarget.style.borderColor = "#6a5a9a"}
-                  onMouseLeave={e => e.currentTarget.style.borderColor = "#2a2a5a"}
-                >
-                  <div style={{ color: "#c8b8e8", marginBottom: 3, fontWeight: "bold" }}>{choice.label}</div>
-                  {choice.preview && <div style={{ color: "#556677", fontSize: 9 }}>{choice.preview}</div>}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── BUILD MENU MODAL ── */}
-      {buildMenu && selCell && !selCell.type && (
-        <div style={{
-          position: "fixed", inset: 0, background: "#00000099", zIndex: 7600,
-          display: "flex", alignItems: "center", justifyContent: "center",
-        }}>
-          <div style={{
-            width: "min(620px, 92vw)",
-            maxHeight: "min(620px, 88vh)",
-            background: "#080b14", border: "1px solid #1e3a5f", borderRadius: 8,
-            padding: 14,
-            display: "flex", flexDirection: "column",
-          }}>
-            <div style={{ color: "#4ab3f4", fontSize: 12, letterSpacing: 2, marginBottom: 10, textAlign: "center" }}>BUILD ROOM</div>
-            <div style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(74px, 1fr))",
-              gap: 6,
-              overflowY: "auto",
-              paddingRight: 2,
-            }}>
-              {Object.entries(ROOM_TYPES).map(([key, def]) => {
-                if (def.requiresTech && !unlockedTechs.includes(def.requiresTech)) return null;
-                if (def.requiresSchematic && !surfaceHaul.schematics.includes(def.requiresSchematic)) return null;
-                const canAfford = Object.entries(def.cost).every(([r, a]) => {
-                  if (r === "salvage") return surfaceHaul.salvage >= a;
-                  if (r === "arcTech") return surfaceHaul.arcTech >= a;
-                  return res[r] >= a;
-                });
-                return (
-                  <button
-                    key={key}
-                    onClick={() => handleBuild(key)}
-                    disabled={!canAfford}
-                    onMouseEnter={() => setHoveredBuildKey(key)}
-                    onMouseLeave={() => setHoveredBuildKey(null)}
-                    style={{
-                    background: canAfford ? def.bg : "#0a0a0a",
-                    border: `1px solid ${canAfford ? def.border : "#1a1a1a"}`,
-                    borderRadius: 4, padding: "3px",
-                    cursor: canAfford ? "pointer" : "not-allowed",
-                    color: canAfford ? def.color : "#2a2a2a",
-                    display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 1,
-                    aspectRatio: "1 / 1",
-                    minHeight: "unset",
-                  }}>
-                    <div style={{ fontSize: 19, lineHeight: 1 }}>{def.icon}</div>
-                    <div style={{ fontSize: 8, fontWeight: "bold", textAlign: "center", letterSpacing: 0.2, lineHeight: 1.1 }}>
-                      {def.label.length > 12 ? `${def.label.slice(0, 12)}…` : def.label}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-
-            {hoveredBuildKey && (() => {
-              const def = ROOM_TYPES[hoveredBuildKey];
-              if (!def) return null;
-              const costStr = Object.entries(def.cost).map(([r, a]) => `${a} ${r}`).join(" · ") || "Free";
-              const canAfford = Object.entries(def.cost).every(([r, a]) => {
-                if (r === "salvage") return surfaceHaul.salvage >= a;
-                if (r === "arcTech") return surfaceHaul.arcTech >= a;
-                return res[r] >= a;
-              });
-              const reqs = [];
-              if (def.requiresTech) reqs.push(`Tech: ${T2_TECHS[def.requiresTech]?.label ?? def.requiresTech}`);
-              if (def.requiresSchematic) reqs.push(`Schematic: ${def.requiresSchematic}`);
-              return (
-                <div style={{
-                  position: "fixed",
-                  left: mousePos.x + 12,
-                  top: mousePos.y + 12,
-                  background: "#0d1020",
-                  border: `1px solid ${def.border}55`,
-                  borderRadius: 6,
-                  padding: "7px 9px",
-                  fontSize: 8,
-                  zIndex: 9999,
-                  pointerEvents: "none",
-                  minWidth: 170,
-                  maxWidth: 240,
-                  boxShadow: "0 0 16px #00000088",
-                }}>
-                  <div style={{ color: def.color, fontSize: 9, fontWeight: "bold", marginBottom: 3, display: "flex", alignItems: "center", gap: 6 }}>
-                    {def.sprite
-                      ? <img src={def.sprite} alt={def.label} style={{ width: 52, height: 52, imageRendering: "pixelated", objectFit: "contain" }} />
-                      : <div style={{ fontSize: 18 }}>{def.icon}</div>
-                    }
-                    <span>{def.label}</span>
-                  </div>
-                  <div style={{ color: "#8a9aaa", marginBottom: 2 }}>Cost: <span style={{ color: canAfford ? "#7ed321" : "#ff7744" }}>{costStr}</span></div>
-                  <div style={{ color: "#556677", lineHeight: 1.5 }}>{def.desc}</div>
-                  {reqs.length > 0 && (
-                    <div style={{ marginTop: 3, color: "#556677" }}>{reqs.join(" · ")}</div>
-                  )}
-                </div>
-              );
-            })()}
-
-            <button onClick={() => { setHoveredBuildKey(null); setBuildMenu(false); setSelected(null); }} style={{
-              width: "100%", background: "none", border: "1px solid #1e2a3a",
-              borderRadius: 4, color: "#445", padding: 6, cursor: "pointer", fontSize: 10, marginTop: 8,
-            }}>CANCEL</button>
-          </div>
+      {gameOver && (
+        <div style={{ background: "#1a0000", border: "2px solid #ff3333", borderRadius: 8, padding: 24, marginBottom: 14, textAlign: "center" }}>
+          <div style={{ fontSize: 24, marginBottom: 8 }}>💀</div>
+          <div style={{ color: "#ff5555", marginBottom: 12 }}>{gameOver}</div>
+          <button onClick={handleRestart} style={{ background: "#3a0000", border: "1px solid #ff3333", borderRadius: 4, color: "#ff9999", padding: "8px 20px", cursor: "pointer" }}>RESTART</button>
         </div>
       )}
 
       {/* ── MAIN LAYOUT ── */}
-      <div style={{ display: "flex", gap: 12, width: "100%", maxWidth: 920, position: "relative", zIndex: 1 }}>
+      <div style={{ display: "flex", gap: 12, width: "100%", maxWidth: 920 }}>
 
         {/* Grid column */}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ border: "none", boxShadow: "none", borderRadius: 6, overflow: "hidden", background: "transparent", position: "relative" }}>
 
-            <div className="surface-bar" style={{ background: "#0a1a0a", borderBottom: "1px dashed #2a4a2a", padding: "4px 10px", fontSize: 9, color: "#3a5a3a", letterSpacing: 2, position: "relative", zIndex: 15 }}>
-              ▲ SURFACE — ARC CONTROLLED ZONE
-            </div>
+          <div style={{ background: "#0a1a0a", border: "1px dashed #2a4a2a", borderRadius: "6px 6px 0 0", padding: "4px 10px", fontSize: 9, color: "#3a5a3a", letterSpacing: 2 }}>
+            ▲ SURFACE — ARC CONTROLLED ZONE
+          </div>
 
+          <div style={{ border: "1px solid #1a2a3a", borderTop: "none", borderRadius: "0 0 6px 6px", overflow: "hidden", background: "#060810" }}>
             {grid.map((row, r) => {
               const isLocked = !unlockedRows.includes(r);
               const excav    = excavations[r];
               const depthLabel = `${(r + 1) * 10}m`;
               return (
-                <div key={r} style={{ display: "flex", position: "relative" }}>
-                  <div className="depth-col" style={{ width: 28, background: "#07090f", borderRight: "1px solid #0d1020", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 8, color: "#1e3040", flexShrink: 0 }}>
+                <div key={r} style={{ display: "flex" }}>
+                  <div style={{ width: 28, background: "#07090f", borderRight: "1px solid #0d1020", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 8, color: "#1e3040", flexShrink: 0 }}>
                     -{depthLabel}
                   </div>
                   {isLocked ? (
                     /* ── LOCKED ROW ── */
                     <div style={{
-                      flex: 1, height: 78,
-                      background: "transparent",
-                      border: "none",
-                      borderBottom: "1px solid rgba(0,0,0,0.3)",
-                      position: "relative",
-                      zIndex: 5,
+                      flex: 1, height: 78, background: "#040508",
+                      border: "1px solid #1a1a2a",
                       display: "flex", alignItems: "center", justifyContent: "space-between",
                       padding: "0 14px",
                     }}>
-                      <div style={{ position: "relative", zIndex: 5 }}>
+                      <div>
                         <div style={{ color: "#334", fontSize: 10, letterSpacing: 1 }}>
                           🔒 &nbsp;-{depthLabel} &nbsp;<span style={{ color: "#222" }}>SEALED — excavation required</span>
                         </div>
@@ -2704,7 +1699,6 @@ export default function Speranza() {
                               padding: "5px 10px",
                               cursor: prereqMet ? "pointer" : "not-allowed",
                               fontSize: 9, letterSpacing: 1, fontFamily: "monospace",
-                              position: "relative", zIndex: 15,
                             }}
                           >{prereqMet ? `⛏ DIG (${EXCAVATION_DEFS[r]?.scrap ?? "?"}⚙)` : "🔒 DIG"}</button>
                         );
@@ -2716,39 +1710,30 @@ export default function Speranza() {
                       const def   = cell.type ? ROOM_TYPES[cell.type] : null;
                       const isSel = selected?.r === r && selected?.c === c;
                       return (
-                        <div className="grid-cell" key={c} onClick={() => handleCellClick(r, c)}
+                        <div key={c} onClick={() => handleCellClick(r, c)}
                           onMouseEnter={() => def && setHoveredCell({ r, c })}
                           onMouseLeave={() => setHoveredCell(null)}
                           style={{
                           flex: 1, height: 78,
                           border: isSel ? "2px solid #4ab3f4" : `1px solid ${def ? def.border + "33" : "#0d1020"}`,
-                          background: def ? def.bg : "transparent",
+                          background: def ? def.bg : (r % 2 === 0 ? "#07090f" : "#060810"),
                           cursor: "pointer",
                           display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-                          position: "relative", transition: "border-color 0.15s, box-shadow 0.15s",
-                          boxShadow: isSel
-                            ? `inset 0 0 22px ${def?.color ?? "#4ab3f4"}22, 0 0 8px ${def?.color ?? "#4ab3f4"}33`
-                            : (def && hoveredCell?.r === r && hoveredCell?.c === c)
-                              ? `inset 0 0 28px ${def.color}28, 0 0 12px ${def.color}44`
-                              : def ? `inset 0 0 18px ${def.color}0d` : "none",
+                          position: "relative", transition: "border-color 0.1s",
+                          boxShadow: def ? `inset 0 0 18px ${def.color}0d` : "none",
                         }}>
-                          {/* Hover tooltip — rendered as fixed overlay following mouse */}
+                          {/* Hover tooltip */}
                           {def && hoveredCell?.r === r && hoveredCell?.c === c && (
                             <div style={{
-                              position: "fixed",
-                              left: mousePos.x + 14,
-                              top: mousePos.y - 10,
+                              position: "absolute", bottom: "calc(100% + 4px)", left: "50%",
+                              transform: "translateX(-50%)",
                               background: "#0d1020", border: `1px solid ${def.border}66`,
-                              borderRadius: 5, padding: "6px 10px", zIndex: 9999,
-                              minWidth: 130, maxWidth: 200, pointerEvents: "none",
-                              boxShadow: `0 0 14px #00000099`,
+                              borderRadius: 5, padding: "6px 10px", zIndex: 999,
+                              minWidth: 130, maxWidth: 180, pointerEvents: "none",
+                              boxShadow: `0 0 12px #00000088`,
                             }}>
-                              <div style={{ color: def.color, fontSize: 9, fontWeight: "bold", marginBottom: 4, display: "flex", alignItems: "center", gap: 6 }}>
-                                {def.sprite
-                                  ? <img src={def.sprite} alt={def.label} style={{ width: 52, height: 52, imageRendering: "pixelated", objectFit: "contain" }} />
-                                  : <div style={{ fontSize: 18 }}>{def.icon}</div>
-                                }
-                                <span>{def.label}</span>
+                              <div style={{ color: def.color, fontSize: 9, fontWeight: "bold", marginBottom: 4 }}>
+                                {def.icon} {def.label}
                               </div>
                               {def.cap > 0 && (
                                 <div style={{ color: "#8899aa", fontSize: 8, marginBottom: 2 }}>
@@ -2756,16 +1741,16 @@ export default function Speranza() {
                                 </div>
                               )}
                               {Object.entries(def.produces).length > 0 && (
-                                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 1 }}>
+                                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                                   {Object.entries(def.produces).map(([res, amt]) => (
-                                    <span key={res} style={{ color: "#7ed321", fontSize: 8 }}>+{amt * Math.max(1, grid[r][c].workers)} {res}/t</span>
+                                    <span key={res} style={{ color: "#7ed321", fontSize: 8 }}>+{amt * grid[r][c].workers} {res}/t</span>
                                   ))}
                                 </div>
                               )}
                               {Object.entries(def.consumes).length > 0 && (
-                                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 1 }}>
+                                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                                   {Object.entries(def.consumes).map(([res, amt]) => (
-                                    <span key={res} style={{ color: "#ff7755", fontSize: 8 }}>-{amt * Math.max(1, grid[r][c].workers)} {res}/t</span>
+                                    <span key={res} style={{ color: "#ff7755", fontSize: 8 }}>-{amt * grid[r][c].workers} {res}/t</span>
                                   ))}
                                 </div>
                               )}
@@ -2779,97 +1764,27 @@ export default function Speranza() {
                               )}
                               {def.special === "sentryPost" && (
                                 <div style={{ color: "#e8d44d", fontSize: 8, marginTop: 2 }}>
-                                  -{grid[r][c].workers * 5} heat/tick
+                                  -{grid[r][c].workers * 5} threat/tick
                                 </div>
                               )}
-                              {!def.cap && !def.produces && <div style={{ color: "#556", fontSize: 8 }}>{def.desc}</div>}
                             </div>
                           )}
                           {def ? (
                             <>
-                              {def.sprite ? (
-                                <>
-                                  {/* Sprite fills full cell edge to edge */}
-                                  <img
-                                    src={def.sprite}
-                                    alt={def.label}
-                                    style={{
-                                      position: "absolute",
-                                      inset: 0,
-                                      width: "100%",
-                                      height: "100%",
-                                      imageRendering: "pixelated",
-                                      objectFit: "cover",
-                                      objectPosition: "center",
-                                    }}
-                                  />
-                                  {/* Label + dots overlaid at bottom of cell */}
-                                  <div style={{
-                                    position: "absolute",
-                                    bottom: 0, left: 0, right: 0,
-                                    background: "linear-gradient(transparent, rgba(0,0,0,0.75))",
-                                    padding: "6px 4px 3px",
-                                    display: "flex", flexDirection: "column", alignItems: "center",
-                                  }}>
-                                    <div style={{ fontSize: 6, color: def.color, letterSpacing: 0.5, textAlign: "center", textShadow: "0 1px 3px #000" }}>
-                                      {def.label.toUpperCase()}
-                                    </div>
-                                    {def.cap > 0 && (
-                                      <div style={{ display: "flex", gap: 4, marginTop: 2 }}>
-                                        {[...Array(def.cap)].map((_, i) => {
-                                          const filled = i < cell.workers;
-                                          return (
-                                            <div
-                                              key={i}
-                                              onClick={e => { e.stopPropagation(); handleAssign(r, c, filled ? -1 : 1); }}
-                                              title={filled ? "Remove worker" : "Assign worker"}
-                                              style={{
-                                                width: 8, height: 8, borderRadius: "50%",
-                                                background: filled ? def.color : "rgba(0,0,0,0.5)",
-                                                border: `1px solid ${def.color}${filled ? "cc" : "44"}`,
-                                                cursor: "pointer",
-                                                boxShadow: filled ? `0 0 4px ${def.color}88` : "none",
-                                              }}
-                                              onMouseEnter={e => { e.currentTarget.style.boxShadow = `0 0 7px ${def.color}cc`; }}
-                                              onMouseLeave={e => { e.currentTarget.style.boxShadow = filled ? `0 0 4px ${def.color}88` : "none"; }}
-                                            />
-                                          );
-                                        })}
-                                      </div>
-                                    )}
-                                  </div>
-                                </>
-                              ) : (
-                                <>
-                                  <div style={{ fontSize: 18 }}>{def.icon}</div>
-                                  <div style={{ fontSize: 7, color: def.color, letterSpacing: 0.5, marginTop: 2, textAlign: "center" }}>
-                                    {def.label.toUpperCase()}
-                                  </div>
-                                  {def.cap > 0 && (
-                                    <div style={{ display: "flex", gap: 4, marginTop: 4 }}>
-                                      {[...Array(def.cap)].map((_, i) => {
-                                        const filled = i < cell.workers;
-                                        return (
-                                          <div
-                                            key={i}
-                                            onClick={e => { e.stopPropagation(); handleAssign(r, c, filled ? -1 : 1); }}
-                                            title={filled ? "Remove worker" : "Assign worker"}
-                                            style={{
-                                              width: 9, height: 9, borderRadius: "50%",
-                                              background: filled ? def.color : "#1a1a2e",
-                                              border: `1px solid ${def.color}${filled ? "cc" : "44"}`,
-                                              cursor: "pointer",
-                                              transition: "background 0.12s, box-shadow 0.12s",
-                                              boxShadow: filled ? `0 0 5px ${def.color}88` : "none",
-                                            }}
-                                            onMouseEnter={e => { e.currentTarget.style.boxShadow = `0 0 7px ${def.color}cc`; e.currentTarget.style.background = filled ? def.color : def.color + "44"; }}
-                                            onMouseLeave={e => { e.currentTarget.style.boxShadow = filled ? `0 0 5px ${def.color}88` : "none"; e.currentTarget.style.background = filled ? def.color : "#1a1a2e"; }}
-                                          />
-                                        );
-                                      })}
-                                    </div>
-                                  )}
-                                </>
+                              <div style={{ fontSize: 18 }}>{def.icon}</div>
+                              <div style={{ fontSize: 7, color: def.color, letterSpacing: 0.5, marginTop: 2, textAlign: "center" }}>
+                                {def.label.toUpperCase()}
+                              </div>
+                              {def.cap > 0 && (
+                                <div style={{ display: "flex", gap: 3, marginTop: 4 }}>
+                                  {[...Array(def.cap)].map((_, i) => (
+                                    <div key={i} style={{
+                                      width: 7, height: 7, borderRadius: "50%",
+                                      background: i < cell.workers ? def.color : "#1a1a2e",
+                                      border: `1px solid ${def.color}55`,
+                                    }} />
+                                  ))}
+                                </div>
                               )}
                               {cell.damaged && (
                                 <div style={{
@@ -2892,101 +1807,6 @@ export default function Speranza() {
                 </div>
               );
             })}
-            {(() => {
-              const CELL_W = gridMetrics.cellW;
-              const CELL_H = gridMetrics.cellH;
-              const DEPTH_COL = gridMetrics.depthCol;
-              const INSET = 5;
-              const COLS = 7;
-              const ROWS = 4;
-              const EXCAVATED = Math.max(0, Math.min(ROWS, unlockedRows.length));
-              const SURFACE_BAR_H = gridMetrics.surfaceBarH;
-
-              const W = DEPTH_COL + COLS * CELL_W;
-              const H = ROWS * CELL_H;
-
-              const outer = `M 0 0 L ${W} 0 L ${W} ${H} L 0 ${H} Z`;
-              const holes = [];
-              for (let row = 0; row < EXCAVATED; row++) {
-                for (let col = 0; col < COLS; col++) {
-                  const x = DEPTH_COL + col * CELL_W + INSET;
-                  const y = row * CELL_H + INSET;
-                  const w = CELL_W - INSET * 2;
-                  const h = CELL_H - INSET * 2;
-                  const r = 3;
-                  holes.push(
-                    `M ${x+r} ${y} L ${x+w-r} ${y} Q ${x+w} ${y} ${x+w} ${y+r} ` +
-                    `L ${x+w} ${y+h-r} Q ${x+w} ${y+h} ${x+w-r} ${y+h} ` +
-                    `L ${x+r} ${y+h} Q ${x} ${y+h} ${x} ${y+h-r} ` +
-                    `L ${x} ${y+r} Q ${x} ${y} ${x+r} ${y} Z`
-                  );
-                }
-              }
-              const fullPath = [outer, ...holes].join(' ');
-
-              return (
-                <svg
-                  style={{
-                    position: "absolute",
-                    top: SURFACE_BAR_H,
-                    left: 0,
-                    width: W,
-                    height: H,
-                    zIndex: 2,
-                    pointerEvents: "none",
-                  }}
-                  viewBox={`0 0 ${W} ${H}`}
-                >
-                  <defs>
-                    {/* Earth texture embedded directly in SVG — no z-index dependency */}
-                    <pattern
-                      id="earthPat"
-                      x="0" y="0"
-                      width={W} height={H}
-                      patternUnits="userSpaceOnUse"
-                    >
-                      <image
-                        href={earthTexture}
-                        x="0" y="-30"
-                        width={W} height={H + 60}
-                        preserveAspectRatio="xMidYMid slice"
-                      />
-                      {/* Dark tint so it reads as underground not daylight */}
-                      <rect width={W} height={H} fill="#000000" opacity="0.45" />
-                    </pattern>
-                  </defs>
-
-                  {/* Earth texture fills the wall areas, holes punch through to rooms */}
-                  <path
-                    d={fullPath}
-                    fill="url(#earthPat)"
-                    fillRule="evenodd"
-                  />
-
-                  {/* Inner shadow on each hole for carved/recessed depth */}
-                  {Array.from({ length: EXCAVATED }).map((_, row) =>
-                    Array.from({ length: COLS }).map((_, col) => {
-                      const x = DEPTH_COL + col * CELL_W + INSET;
-                      const y = row * CELL_H + INSET;
-                      const w = CELL_W - INSET * 2;
-                      const h = CELL_H - INSET * 2;
-                      return (
-                        <rect
-                          key={`${col}-${row}`}
-                          x={x} y={y}
-                          width={w} height={h}
-                          fill="none"
-                          stroke="#000000"
-                          strokeWidth={14}
-                          strokeOpacity={0.6}
-                          rx={3}
-                        />
-                      );
-                    })
-                  )}
-                </svg>
-              );
-            })()}
           </div>
 
           {/* ── Supply / Demand ── */}
@@ -2996,18 +1816,14 @@ export default function Speranza() {
               { key: "energy", icon: "⚡", label: "Energy", color: "#f5a623" },
               { key: "food",   icon: "🌱", label: "Food",   color: "#7ed321" },
               { key: "water",  icon: "💧", label: "Water",  color: "#4a90e2" },
-              { key: "morale", icon: "🧭", label: "Morale", color: "#d4a843" },
+              { key: "scrap",  icon: "🔧", label: "Scrap",  color: "#bd10e0" },
             ].map(({ key, icon, label, color }) => {
-              const val    = key === "morale" ? (statBreakdown.morale?.net ?? 0) : (netFlow[key] || 0);
+              const val    = netFlow[key] || 0;
               const pct    = Math.min(Math.abs(val) / 12, 1) * 50;
               const surplus = val >= 0;
               const crit   = val < -5;
               return (
-                <div
-                  key={key}
-                  onMouseEnter={() => setHoveredFlowStat(key)}
-                  onMouseLeave={() => setHoveredFlowStat(null)}
-                  style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5 }}>
+                <div key={key} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5 }}>
                   <div style={{ width: 58, display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
                     <span style={{ fontSize: 11 }}>{icon}</span>
                     <span style={{ fontSize: 9, color: "#3a5060" }}>{label}</span>
@@ -3031,39 +1847,6 @@ export default function Speranza() {
                 </div>
               );
             })}
-
-            {hoveredFlowStat && statBreakdown[hoveredFlowStat] && (() => {
-              const data = statBreakdown[hoveredFlowStat];
-              return (
-                <div style={{
-                  position: "fixed",
-                  left: mousePos.x + 14,
-                  top: mousePos.y + 10,
-                  background: "#0d1020",
-                  border: "1px solid #2a3a4a",
-                  borderRadius: 6,
-                  padding: "8px 10px",
-                  zIndex: 9999,
-                  minWidth: 170,
-                  maxWidth: 260,
-                  pointerEvents: "none",
-                  boxShadow: "0 0 14px #00000099",
-                }}>
-                  <div style={{ color: "#9ab", fontSize: 8, letterSpacing: 1, marginBottom: 4 }}>{hoveredFlowStat.toUpperCase()} MODIFIERS</div>
-                  <div style={{ color: "#7ed321", fontSize: 8, marginBottom: 2 }}>+ Reasons</div>
-                  {(data.plus.length ? data.plus : ["No major modifiers this tick"]).slice(0, 5).map((line, i) => (
-                    <div key={`p-${i}`} style={{ color: "#6fa86f", fontSize: 8, lineHeight: 1.4 }}>• {line}</div>
-                  ))}
-                  <div style={{ color: "#ff7777", fontSize: 8, margin: "5px 0 2px" }}>– Reasons</div>
-                  {(data.minus.length ? data.minus : ["No major modifiers this tick"]).slice(0, 5).map((line, i) => (
-                    <div key={`m-${i}`} style={{ color: "#b67878", fontSize: 8, lineHeight: 1.4 }}>• {line}</div>
-                  ))}
-                  <div style={{ marginTop: 6, borderTop: "1px solid #1a2535", paddingTop: 4, color: "#8aa", fontSize: 8, fontFamily: "monospace" }}>
-                    Net this tick: {data.net > 0 ? `+${data.net.toFixed(1)}` : data.net.toFixed(1)}
-                  </div>
-                </div>
-              );
-            })()}
           </div>
 
           {/* ── Colonist Roster ── */}
@@ -3085,11 +1868,7 @@ export default function Speranza() {
                   const hasPending = col.pendingTraitPick;
                   const borderColor = hasPending ? "#f5a623" : STATUS_COLOR[col.status];
                   return (
-                    <div key={col.id}
-                      onClick={() => setSelectedColonist(prev => prev === col.id ? null : col.id)}
-                      onMouseEnter={() => setHoveredColonist(col.id)}
-                      onMouseLeave={() => setHoveredColonist(null)}
-                      style={{
+                    <div key={col.id} onClick={() => setSelectedColonist(prev => prev === col.id ? null : col.id)} style={{
                       display: "flex", alignItems: "flex-start", gap: 6,
                       background: hasPending ? "#1a1000" : selectedColonist === col.id ? "#0a1525" : "#0a0c14",
                       border: `1px solid ${selectedColonist === col.id ? "#4ab3f4" : borderColor}${hasPending ? "" : selectedColonist === col.id ? "" : "33"}`,
@@ -3139,24 +1918,21 @@ export default function Speranza() {
                             {xpInLevel}/20
                           </div>
                         </div>
-                        {/* Trait pips + quirk icon */}
-                        <div style={{ display: "flex", gap: 3, marginTop: 3, flexWrap: "wrap" }}>
-                          {col.quirk && (
-                            <div title={col.quirk.desc} style={{ fontSize: 8, background: "#0a0a18", border: "1px solid #2a2a5a44", borderRadius: 3, padding: "0 3px", color: "#9988cc" }}>
-                              {col.quirk.icon}
-                            </div>
-                          )}
-                          {col.traits && col.traits.map(t => (
-                            <div key={t} title={TRAITS[t]?.desc} style={{
-                              fontSize: 8, background: "#0a0a14",
-                              border: `1px solid ${TRAITS[t]?.color ?? "#333"}44`,
-                              borderRadius: 3, padding: "0 3px",
-                              color: TRAITS[t]?.color ?? "#888",
-                            }}>
-                              {TRAITS[t]?.icon} {TRAITS[t]?.label}
-                            </div>
-                          ))}
-                        </div>
+                        {/* Trait pips */}
+                        {col.traits && col.traits.length > 0 && (
+                          <div style={{ display: "flex", gap: 3, marginTop: 3, flexWrap: "wrap" }}>
+                            {col.traits.map(t => (
+                              <div key={t} title={TRAITS[t]?.desc} style={{
+                                fontSize: 8, background: "#0a0a14",
+                                border: `1px solid ${TRAITS[t]?.color ?? "#333"}44`,
+                                borderRadius: 3, padding: "0 3px",
+                                color: TRAITS[t]?.color ?? "#888",
+                              }}>
+                                {TRAITS[t]?.icon} {TRAITS[t]?.label}
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     </div>
                   );
@@ -3166,101 +1942,12 @@ export default function Speranza() {
           </div>
 
           <div style={{ marginTop: 5, fontSize: 8, color: "#1a2535", letterSpacing: 1 }}>
-            CLICK EMPTY CELL TO BUILD · CLICK CIRCLES TO ASSIGN WORKERS
+            CLICK EMPTY CELL TO BUILD · CLICK ROOM TO MANAGE WORKERS
           </div>
         </div>
 
-        {/* ── COLONIST HOVER TOOLTIP (fixed, follows mouse) ── */}
-        {hoveredColonist && (() => {
-          const col = colonists.find(c => c.id === hoveredColonist);
-          if (!col) return null;
-          const statusColor = STATUS_COLOR[col.status] ?? "#888";
-          return (
-            <div style={{
-              position: "fixed",
-              left: mousePos.x + 14,
-              top: mousePos.y + 10,
-              background: "#0d1020", border: `1px solid ${statusColor}55`,
-              borderRadius: 6, padding: "8px 12px", zIndex: 9999,
-              minWidth: 150, maxWidth: 220, pointerEvents: "none",
-              boxShadow: `0 0 16px #00000099, 0 0 8px ${statusColor}22`,
-            }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
-                <div style={{ width: 7, height: 7, borderRadius: "50%", background: statusColor, boxShadow: `0 0 4px ${statusColor}`, flexShrink: 0 }} />
-                <span style={{ color: "#c8d0d8", fontSize: 10, fontWeight: "bold", letterSpacing: 1 }}>{col.name}</span>
-                {(col.level ?? 0) > 0 && (
-                  <span style={{ color: "#f5a623", fontSize: 8, background: "#1a1000", border: "1px solid #f5a62344", borderRadius: 3, padding: "0 3px" }}>Lv{col.level}</span>
-                )}
-              </div>
-              <div style={{ color: statusColor, fontSize: 8, letterSpacing: 1, marginBottom: col.quirk ? 5 : 0 }}>
-                {STATUS_LABEL[col.status]}
-                {col.status === "injured" && col.injuryTicksLeft > 0 ? ` — ${col.injuryTicksLeft}t` : ""}
-              </div>
-              {col.quirk && (
-                <div style={{ color: "#9988cc", fontSize: 8, borderTop: "1px solid #1a1a2e", paddingTop: 4, marginTop: 2 }}>
-                  {col.quirk.icon} <span style={{ color: "#7a6aaa" }}>{col.quirk.label}</span>
-                </div>
-              )}
-              {col.backstory && (
-                <div style={{ color: "#334455", fontSize: 7, marginTop: 4, lineHeight: 1.5, fontStyle: "italic", borderTop: "1px solid #111" , paddingTop: 4 }}>
-                  {col.backstory.length > 80 ? col.backstory.slice(0, 80) + "…" : col.backstory}
-                </div>
-              )}
-            </div>
-          );
-        })()}
-
         {/* ── SIDE PANEL ── */}
         <div style={{ width: 205, display: "flex", flexDirection: "column", gap: 8, flexShrink: 0 }}>
-
-          {/* Log */}
-          {journalOpen && (
-            <div style={{ background: "#050710", border: "1px solid #0d1520", borderRadius: 8, padding: 10 }}>
-              <div style={{ color: "#2a4a6a", fontSize: 9, letterSpacing: 2, marginBottom: 6 }}>COLONY LOG</div>
-              <div style={{ fontSize: 8, lineHeight: 1.9, maxHeight: 160, overflowY: "auto" }}>
-                {log.map((entry, i) => (
-                  <div key={i} style={{ color: i === 0 ? "#5a8ab0" : "#2a4060", borderBottom: "1px solid #0d1520", paddingBottom: 2, marginBottom: 2 }}>
-                    {entry}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Colony Effects */}
-          {effectsOpen && (
-            <div style={{ background: "#0b0c12", border: "1px solid #2a2414", borderRadius: 8, padding: 10 }}>
-              <div style={{ color: "#d4a843", fontSize: 9, letterSpacing: 2, marginBottom: 7 }}>🧪 COLONY EFFECTS</div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 8 }}>
-                <div style={{ color: "#8899aa" }}>
-                  Surface: <span style={{ color: surfaceCondition.color }}>{surfaceCondition.icon} {surfaceCondition.label}</span>
-                </div>
-                <div style={{ color: "#556677", fontSize: 7, lineHeight: 1.4 }}>{surfaceCondition.desc}</div>
-                <div style={{ color: "#8899aa" }}>Heat State: <span style={{ color: heatState.color }}>{heatState.label}</span></div>
-                <div style={{ color: "#8899aa" }}>Heat Suppression: <span style={{ color: heatSuppressedTicks > 0 ? "#7ed321" : "#556" }}>{heatSuppressedTicks}t</span></div>
-                <div style={{ color: "#8899aa" }}>Shelter: <span style={{ color: shelteredCount > 0 ? "#7ecfb4" : "#556" }}>{shelteredCount > 0 ? `${shelteredCount} sheltered` : "inactive"}</span></div>
-                <div style={{ color: "#8899aa" }}>Memorial Hall: <span style={{ color: memorialHallBuilt ? "#9988bb" : "#556" }}>{memorialHallBuilt ? "active" : "not built"}</span></div>
-                <div style={{ color: "#8899aa" }}>Radio Tower: <span style={{ color: hasRadioTower ? (radioTowerOnline ? "#4ab3f4" : "#ff7744") : "#556" }}>{hasRadioTower ? (radioTowerOnline ? "online" : "offline by condition") : "not built"}</span></div>
-              </div>
-
-              <div style={{ marginTop: 8, borderTop: "1px solid #1a1d2a", paddingTop: 6 }}>
-                <div style={{ color: "#7a6a4a", fontSize: 8, letterSpacing: 1, marginBottom: 4 }}>RECENT DILEMMA OUTCOMES</div>
-                {recentDilemmaOutcomes.length === 0 ? (
-                  <div style={{ color: "#445", fontSize: 8, fontStyle: "italic" }}>No recent outcomes.</div>
-                ) : (
-                  <div style={{ maxHeight: 96, overflowY: "auto", display: "flex", flexDirection: "column", gap: 5 }}>
-                    {recentDilemmaOutcomes.slice(0, 4).map((outcome) => (
-                      <div key={outcome.id} style={{ borderBottom: "1px solid #121522", paddingBottom: 3 }}>
-                        <div style={{ color: "#8a9aaa", fontSize: 7 }}>[{tickToDayHour(outcome.tick)}]</div>
-                        <div style={{ color: "#b8c8d8", fontSize: 8 }}>{outcome.choice}</div>
-                        <div style={{ color: "#556677", fontSize: 7 }}>{outcome.summary}</div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
 
           {/* Colonist Detail Window */}
           {selectedColonist && (() => {
@@ -3304,27 +1991,9 @@ export default function Speranza() {
                     </div>
                   </div>
                 )}
-                {col.quirk && (
-                  <div style={{ marginBottom: 8 }}>
-                    <div style={{ color: "#2a4a6a", fontSize: 7, letterSpacing: 1, marginBottom: 4 }}>QUIRK</div>
-                    <div style={{ background: "#0a0a18", border: "1px solid #2a2a5a", borderRadius: 4, padding: "5px 8px" }}>
-                      <div style={{ color: "#9988cc", fontSize: 9, marginBottom: 2 }}>{col.quirk.icon} {col.quirk.label}</div>
-                      <div style={{ color: "#556677", fontSize: 7, lineHeight: 1.5 }}>{col.quirk.desc}</div>
-                    </div>
-                  </div>
-                )}
-                <div style={{ marginBottom: 8 }}>
-                  <div style={{ color: "#2a4a6a", fontSize: 7, letterSpacing: 1, marginBottom: 4 }}>BACKGROUND</div>
-                  <div style={{ color: "#445566", fontSize: 7, lineHeight: 1.6, fontStyle: "italic" }}>{col.backstory || "No record."}</div>
-                </div>
                 <div>
                   <div style={{ color: "#2a4a6a", fontSize: 7, letterSpacing: 1, marginBottom: 4 }}>SERVICE RECORD</div>
-                  {[
-                    ["Joined", tickToDayHour(col.joinTick ?? 0)],
-                    ["Expeditions completed", col.expeditionsCompleted ?? 0],
-                    ["Raids survived", col.raidsSurvived ?? 0],
-                    ["Times injured", col.injuryCount ?? 0],
-                  ].map(([label, val]) => (
+                  {[["Duty ticks", col.dutyTicks ?? 0], ["Times injured", col.injuryCount ?? 0]].map(([label, val]) => (
                     <div key={label} style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
                       <span style={{ color: "#445", fontSize: 8 }}>{label}</span>
                       <span style={{ color: "#7a9aaa", fontSize: 8, fontFamily: "monospace" }}>{val}</span>
@@ -3334,6 +2003,42 @@ export default function Speranza() {
               </div>
             );
           })()}
+
+          {/* Build menu */}
+          {buildMenu && selCell && !selCell.type && (
+            <div style={{ background: "#080b14", border: "1px solid #1e3a5f", borderRadius: 8, padding: 10 }}>
+              <div style={{ color: "#4ab3f4", fontSize: 10, letterSpacing: 2, marginBottom: 8 }}>BUILD ROOM</div>
+              {Object.entries(ROOM_TYPES).map(([key, def]) => {
+                if (def.requiresTech && !unlockedTechs.includes(def.requiresTech)) return null;
+                if (def.requiresSchematic && !surfaceHaul.schematics.includes(def.requiresSchematic)) return null;
+                const costStr   = Object.entries(def.cost).map(([r, a]) => `${a} ${r}`).join(", ");
+                const canAfford = Object.entries(def.cost).every(([r, a]) => {
+                  if (r === "salvage") return surfaceHaul.salvage >= a;
+                  if (r === "arcTech") return surfaceHaul.arcTech >= a;
+                  return res[r] >= a;
+                });
+                return (
+                  <button key={key} onClick={() => handleBuild(key)} disabled={!canAfford} style={{
+                    display: "block", width: "100%", marginBottom: 5,
+                    background: canAfford ? def.bg : "#0a0a0a",
+                    border: `1px solid ${canAfford ? def.border : "#1a1a1a"}`,
+                    borderRadius: 5, padding: "6px 8px",
+                    cursor: canAfford ? "pointer" : "not-allowed",
+                    textAlign: "left", color: canAfford ? def.color : "#2a2a2a",
+                  }}>
+                    <div style={{ fontSize: 12 }}>{def.icon} {def.label}</div>
+                    <div style={{ fontSize: 8, color: canAfford ? "#556" : "#1a1a1a", marginTop: 2 }}>
+                      {costStr || "Free"} — {def.desc}
+                    </div>
+                  </button>
+                );
+              })}
+              <button onClick={() => { setBuildMenu(false); setSelected(null); }} style={{
+                width: "100%", background: "none", border: "1px solid #1e2a3a",
+                borderRadius: 4, color: "#445", padding: 4, cursor: "pointer", fontSize: 9, marginTop: 3,
+              }}>CANCEL</button>
+            </div>
+          )}
 
           {/* Room panel */}
           {selCell?.type && !buildMenu && (
@@ -3445,7 +2150,7 @@ export default function Speranza() {
                                 <div style={{ fontSize: 11, color: canSend ? def.color : "#333" }}>{def.icon} {def.label}</div>
                                 <div style={{ fontSize: 7, color: canSend ? "#556" : "#222", marginTop: 2, lineHeight: 1.4 }}>{def.desc}</div>
                                 <div style={{ fontSize: 7, color: canSend ? "#883333" : "#222", marginTop: 3 }}>
-                                  {def.colonistsRequired} colonist · {expedDuration}t · heat +{def.threatDelta}
+                                  {def.colonistsRequired} colonist · {expedDuration}t · threat +{def.threatDelta}
                                 </div>
                               </button>
                             );
@@ -3579,7 +2284,7 @@ export default function Speranza() {
                     ) : (
                       <>
                         <div style={{ color: "#c8d0d8", fontSize: 9 }}>🪖 {selCell.workers} sentry{selCell.workers > 1 ? "ies" : ""} active</div>
-                        <div style={{ color: "#e8d44d", fontSize: 8, marginTop: 3 }}>-{selCell.workers * 5} heat/tick</div>
+                        <div style={{ color: "#e8d44d", fontSize: 8, marginTop: 3 }}>-{selCell.workers * 5} threat/tick</div>
                         <div style={{ color: "#5a5020", fontSize: 7, marginTop: 2 }}>Sentries are exposed during raids.</div>
                       </>
                     )}
@@ -3631,6 +2336,17 @@ export default function Speranza() {
             </div>
           )}
 
+          {/* Log */}
+          <div style={{ background: "#050710", border: "1px solid #0d1520", borderRadius: 8, padding: 10, flex: 1 }}>
+            <div style={{ color: "#2a4a6a", fontSize: 9, letterSpacing: 2, marginBottom: 6 }}>COLONY LOG</div>
+            <div style={{ fontSize: 8, lineHeight: 1.9, maxHeight: 220, overflowY: "auto" }}>
+              {log.map((entry, i) => (
+                <div key={i} style={{ color: i === 0 ? "#5a8ab0" : "#2a4060", borderBottom: "1px solid #0d1520", paddingBottom: 2, marginBottom: 2 }}>
+                  {entry}
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -3641,7 +2357,7 @@ export default function Speranza() {
       {/* ── MILESTONE TOAST ── */}
       {milestoneToast && (
         <div style={{
-          position: "fixed", top: "38vh", left: "50%", transform: "translateX(-50%)",
+          position: "fixed", top: 80, left: "50%", transform: "translateX(-50%)",
           background: "#0d0f00", border: "2px solid #ffd700",
           borderRadius: 8, padding: "14px 22px",
           minWidth: 260, maxWidth: 360,
@@ -3658,83 +2374,46 @@ export default function Speranza() {
       )}
 
       {/* ── TOAST NOTIFICATIONS ── */}
-      {toasts.length > 0 && (
-        <div style={{
-          position: "fixed", top: "38vh", left: "50%", transform: "translateX(-50%)",
-          display: "flex", flexDirection: "column", alignItems: "center", gap: 8,
-          zIndex: 1000,
-        }}>
-          {/* Paused indicator */}
-          <div style={{ fontSize: 8, color: "#f5a623", letterSpacing: 2, background: "#1a0d00", border: "1px solid #f5a62344", borderRadius: 4, padding: "2px 10px" }}>
-            ⏸ PAUSED — notifications active
-          </div>
-          {toasts.map(toast => {
-            const styles = {
-              raid:    { bg: "#1a0000", border: "#ff4444", title: "#ff4444" },
-              injury:  { bg: "#1a0a00", border: "#f5a623", title: "#f5a623" },
-              success: { bg: "#001a08", border: "#7ed321", title: "#7ed321" },
-              info:    { bg: "#00101a", border: "#4ab3f4", title: "#4ab3f4" },
-            }[toast.type] || { bg: "#0a0a14", border: "#4ab3f4", title: "#4ab3f4" };
+      <div style={{
+        position: "fixed", top: 20, left: "50%", transform: "translateX(-50%)",
+        display: "flex", flexDirection: "column", alignItems: "center", gap: 8,
+        pointerEvents: "none", zIndex: 1000,
+      }}>
+        {toasts.map(toast => {
+          const styles = {
+            raid:    { bg: "#1a0000", border: "#ff4444", title: "#ff4444", icon: "🚨" },
+            injury:  { bg: "#1a0a00", border: "#f5a623", title: "#f5a623", icon: "⚠️" },
+            success: { bg: "#001a08", border: "#7ed321", title: "#7ed321", icon: "✅" },
+            info:    { bg: "#00101a", border: "#4ab3f4", title: "#4ab3f4", icon: "ℹ️" },
+          }[toast.type] || { bg: "#0a0a14", border: "#4ab3f4", title: "#4ab3f4" };
 
-            const lines = toast.message.split("\n");
-            const titleLine = lines[0];
-            const bodyLines = lines.slice(1);
+          const lines = toast.message.split("\n");
+          const titleLine = lines[0];
+          const bodyLines = lines.slice(1);
 
-            const dismissToast = (id) => {
-              setToasts(prev => {
-                const next = prev.filter(t => t.id !== id);
-                if (next.length === 0) {
-                  setTimescale(timescaleBeforeToastRef.current);
-                }
-                return next;
-              });
-            };
-
-            return (
-              <div key={toast.id} style={{
-                background: styles.bg,
-                border: `1px solid ${styles.border}`,
-                borderLeft: `3px solid ${styles.border}`,
-                borderRadius: 6,
-                padding: "10px 16px",
-                minWidth: 260, maxWidth: 360,
-                boxShadow: `0 0 20px ${styles.border}44`,
-                animation: "toastIn 0.2s ease-out",
-                position: "relative",
-              }}>
-                <button onClick={() => dismissToast(toast.id)} style={{
-                  position: "absolute", top: 6, right: 8,
-                  background: "none", border: "none", cursor: "pointer",
-                  color: styles.border, fontSize: 13, lineHeight: 1, opacity: 0.7,
-                  padding: 2,
-                }}>✕</button>
-                <div style={{ color: styles.title, fontSize: 11, fontWeight: "bold", letterSpacing: 1.5, marginBottom: bodyLines.length ? 4 : 0, paddingRight: 16 }}>
-                  {titleLine}
-                </div>
-                {bodyLines.map((line, i) => (
-                  <div key={i} style={{ color: "#8a9aaa", fontSize: 10, lineHeight: 1.6 }}>{line}</div>
-                ))}
+          return (
+            <div key={toast.id} style={{
+              background: styles.bg,
+              border: `1px solid ${styles.border}`,
+              borderLeft: `3px solid ${styles.border}`,
+              borderRadius: 6,
+              padding: "10px 16px",
+              minWidth: 260, maxWidth: 360,
+              boxShadow: `0 0 20px ${styles.border}44`,
+              animation: "toastIn 0.2s ease-out",
+            }}>
+              <div style={{ color: styles.title, fontSize: 11, fontWeight: "bold", letterSpacing: 1.5, marginBottom: bodyLines.length ? 4 : 0 }}>
+                {titleLine}
               </div>
-            );
-          })}
-          {/* Dismiss all button when multiple toasts */}
-          {toasts.length > 1 && (
-            <button onClick={() => {
-              setToasts([]);
-              setTimescale(timescaleBeforeToastRef.current);
-            }} style={{
-              background: "#0a0c14", border: "1px solid #2a3545", borderRadius: 4,
-              color: "#445", padding: "4px 14px", cursor: "pointer", fontSize: 9, letterSpacing: 1,
-            }}>DISMISS ALL</button>
-          )}
-        </div>
-      )}
+              {bodyLines.map((line, i) => (
+                <div key={i} style={{ color: "#8a9aaa", fontSize: 10, lineHeight: 1.6 }}>{line}</div>
+              ))}
+            </div>
+          );
+        })}
+      </div>
 
       <style>{`
-        @keyframes twinkle {
-          from { opacity: 0.2; transform: scale(0.8); }
-          to { opacity: 1; transform: scale(1.2); }
-        }
         @keyframes toastIn {
           from { opacity: 0; transform: translateY(-8px); }
           to   { opacity: 1; transform: translateY(0); }

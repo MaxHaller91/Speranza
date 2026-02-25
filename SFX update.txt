@@ -1,0 +1,301 @@
+Here's the complete Cline prompt:
+
+---
+
+**Add new sound functions to `sounds.js`. All use the existing Web Audio API pattern already in the file. Add the following exports:**
+
+---
+
+**`playAssign`** — Gear Whirr (C)
+```js
+export function playAssign(ctx) {
+  const o = ctx.createOscillator();
+  const g = ctx.createGain();
+  o.type = 'sawtooth';
+  o.frequency.setValueAtTime(80, ctx.currentTime);
+  o.frequency.exponentialRampToValueAtTime(120, ctx.currentTime + 0.1);
+  g.gain.setValueAtTime(0.2, ctx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12);
+  const filt = ctx.createBiquadFilter();
+  filt.type = 'bandpass'; filt.frequency.value = 100; filt.Q.value = 2;
+  o.connect(filt); filt.connect(g); g.connect(ctx.destination);
+  o.start(); o.stop(ctx.currentTime + 0.15);
+}
+```
+
+**`playUnassign`** — Soft Pop (B)
+```js
+export function playUnassign(ctx) {
+  const o = ctx.createOscillator();
+  const g = ctx.createGain();
+  o.type = 'sine';
+  o.frequency.setValueAtTime(200, ctx.currentTime);
+  o.frequency.exponentialRampToValueAtTime(60, ctx.currentTime + 0.05);
+  g.gain.setValueAtTime(0.35, ctx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.08);
+  o.connect(g); g.connect(ctx.destination);
+  o.start(); o.stop(ctx.currentTime + 0.1);
+}
+```
+
+**`playMilestone`** — Deep Gong (B)
+```js
+export function playMilestone(ctx) {
+  const o = ctx.createOscillator();
+  const o2 = ctx.createOscillator();
+  const g = ctx.createGain();
+  o.type = 'sine'; o.frequency.value = 110;
+  o2.type = 'sine'; o2.frequency.value = 155;
+  g.gain.setValueAtTime(0.6, ctx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 2.5);
+  const g2 = ctx.createGain(); g2.gain.value = 0.3;
+  o.connect(g); o2.connect(g2); g2.connect(g); g.connect(ctx.destination);
+  o.start(); o2.start();
+  o.stop(ctx.currentTime + 2.6); o2.stop(ctx.currentTime + 2.6);
+}
+```
+
+**`playDilemma`** — Alarm Pulse ×2 (C)
+```js
+export function playDilemma(ctx) {
+  [0, 0.4].forEach(delay => {
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.type = 'square'; o.frequency.value = 220;
+    g.gain.setValueAtTime(0, ctx.currentTime + delay);
+    g.gain.linearRampToValueAtTime(0.12, ctx.currentTime + delay + 0.02);
+    g.gain.setValueAtTime(0.12, ctx.currentTime + delay + 0.12);
+    g.gain.linearRampToValueAtTime(0, ctx.currentTime + delay + 0.18);
+    const filt = ctx.createBiquadFilter();
+    filt.type = 'lowpass'; filt.frequency.value = 800;
+    o.connect(filt); filt.connect(g); g.connect(ctx.destination);
+    o.start(ctx.currentTime + delay);
+    o.stop(ctx.currentTime + delay + 0.2);
+  });
+}
+```
+
+**`playDilemmaResolve`** — Neutral Click (A)
+```js
+export function playDilemmaResolve(ctx) {
+  const o = ctx.createOscillator();
+  const g = ctx.createGain();
+  o.type = 'sine'; o.frequency.value = 180;
+  g.gain.setValueAtTime(0.3, ctx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.1);
+  o.connect(g); g.connect(ctx.destination);
+  o.start(); o.stop(ctx.currentTime + 0.12);
+}
+```
+
+**`playDemolish`** — Crash / Crumble (A)
+```js
+export function playDemolish(ctx) {
+  const buf = ctx.createBuffer(1, ctx.sampleRate * 0.5, ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < data.length; i++) {
+    const t = i / ctx.sampleRate;
+    data[i] = Math.exp(-t * 8) * (Math.random() * 2 - 1) * 0.6;
+  }
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  const filt = ctx.createBiquadFilter();
+  filt.type = 'lowpass'; filt.frequency.value = 800;
+  filt.frequency.exponentialRampToValueAtTime(200, ctx.currentTime + 0.4);
+  src.connect(filt); filt.connect(ctx.destination);
+  src.start();
+}
+```
+
+**`playRepair`** — Tool Taps ×2 (A)
+```js
+export function playRepair(ctx) {
+  [0, 0.12].forEach(delay => {
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.type = 'square'; o.frequency.value = 300;
+    g.gain.setValueAtTime(0.2, ctx.currentTime + delay);
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + delay + 0.06);
+    const filt = ctx.createBiquadFilter();
+    filt.type = 'highpass'; filt.frequency.value = 800;
+    o.connect(filt); filt.connect(g); g.connect(ctx.destination);
+    o.start(ctx.currentTime + delay); o.stop(ctx.currentTime + delay + 0.08);
+  });
+}
+```
+
+**`playRecruit`** — Entry Sweep (C)
+```js
+export function playRecruit(ctx) {
+  const o = ctx.createOscillator();
+  const g = ctx.createGain();
+  o.type = 'sine';
+  o.frequency.setValueAtTime(200, ctx.currentTime);
+  o.frequency.linearRampToValueAtTime(400, ctx.currentTime + 0.3);
+  g.gain.setValueAtTime(0, ctx.currentTime);
+  g.gain.linearRampToValueAtTime(0.3, ctx.currentTime + 0.1);
+  g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6);
+  o.connect(g); g.connect(ctx.destination);
+  o.start(); o.stop(ctx.currentTime + 0.65);
+}
+```
+
+**`playShelterAlarm`** — Rising Siren (B)
+```js
+export function playShelterAlarm(ctx) {
+  const o = ctx.createOscillator();
+  const g = ctx.createGain();
+  o.type = 'sawtooth';
+  o.frequency.setValueAtTime(300, ctx.currentTime);
+  o.frequency.exponentialRampToValueAtTime(900, ctx.currentTime + 0.4);
+  g.gain.setValueAtTime(0.15, ctx.currentTime);
+  g.gain.setValueAtTime(0.15, ctx.currentTime + 0.35);
+  g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
+  const filt = ctx.createBiquadFilter();
+  filt.type = 'lowpass'; filt.frequency.value = 1500;
+  o.connect(filt); filt.connect(g); g.connect(ctx.destination);
+  o.start(); o.stop(ctx.currentTime + 0.55);
+}
+```
+
+**`playSurfaceCondition`** — Atmospheric Tone (C)
+```js
+export function playSurfaceCondition(ctx) {
+  const o = ctx.createOscillator();
+  const g = ctx.createGain();
+  o.type = 'sine'; o.frequency.value = 220;
+  g.gain.setValueAtTime(0, ctx.currentTime);
+  g.gain.linearRampToValueAtTime(0.08, ctx.currentTime + 0.3);
+  g.gain.setValueAtTime(0.08, ctx.currentTime + 0.5);
+  g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 1.0);
+  o.connect(g); g.connect(ctx.destination);
+  o.start(); o.stop(ctx.currentTime + 1.1);
+}
+```
+
+**`playStructuralDamage`** — Explosion Thud (B)
+```js
+export function playStructuralDamage(ctx) {
+  const o = ctx.createOscillator();
+  const g = ctx.createGain();
+  o.type = 'sine';
+  o.frequency.setValueAtTime(120, ctx.currentTime);
+  o.frequency.exponentialRampToValueAtTime(40, ctx.currentTime + 0.3);
+  g.gain.setValueAtTime(0.7, ctx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+  const buf = ctx.createBuffer(1, ctx.sampleRate * 0.1, ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < data.length; i++) {
+    data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (ctx.sampleRate * 0.03)) * 0.5;
+  }
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  src.connect(ctx.destination); src.start();
+  o.connect(g); g.connect(ctx.destination);
+  o.start(); o.stop(ctx.currentTime + 0.45);
+}
+```
+
+**`playBarricadesHold`** — Shield Clang (B)
+```js
+export function playBarricadesHold(ctx) {
+  const o = ctx.createOscillator();
+  const g = ctx.createGain();
+  o.type = 'triangle';
+  o.frequency.setValueAtTime(600, ctx.currentTime);
+  o.frequency.exponentialRampToValueAtTime(300, ctx.currentTime + 0.5);
+  g.gain.setValueAtTime(0.5, ctx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6);
+  o.connect(g); g.connect(ctx.destination);
+  o.start(); o.stop(ctx.currentTime + 0.65);
+}
+```
+
+**`playTurret`** — Mechanical Burst ×3 (B)
+```js
+export function playTurret(ctx) {
+  [0, 0.06, 0.12].forEach(delay => {
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.type = 'square'; o.frequency.value = 220;
+    g.gain.setValueAtTime(0.2, ctx.currentTime + delay);
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + delay + 0.05);
+    const filt = ctx.createBiquadFilter();
+    filt.type = 'lowpass'; filt.frequency.value = 1000;
+    o.connect(filt); filt.connect(g); g.connect(ctx.destination);
+    o.start(ctx.currentTime + delay); o.stop(ctx.currentTime + delay + 0.06);
+  });
+}
+```
+
+**`playEMP`** — System Disruption (B)
+```js
+export function playEMP(ctx) {
+  const o = ctx.createOscillator();
+  const g = ctx.createGain();
+  o.type = 'sawtooth';
+  o.frequency.setValueAtTime(800, ctx.currentTime);
+  o.frequency.exponentialRampToValueAtTime(50, ctx.currentTime + 0.6);
+  g.gain.setValueAtTime(0.2, ctx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.7);
+  const filt = ctx.createBiquadFilter();
+  filt.type = 'lowpass'; filt.frequency.value = 1200;
+  o.connect(filt); filt.connect(g); g.connect(ctx.destination);
+  o.start(); o.stop(ctx.currentTime + 0.75);
+}
+```
+
+**`playAutosave`** — Soft Chime (A)
+```js
+export function playAutosave(ctx) {
+  [660, 880].forEach((freq, i) => {
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.type = 'sine'; o.frequency.value = freq;
+    const t = ctx.currentTime + i * 0.1;
+    g.gain.setValueAtTime(0.12, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.4);
+    o.connect(g); g.connect(ctx.destination);
+    o.start(t); o.stop(t + 0.45);
+  });
+}
+```
+
+**`playMoraleCollapse`** — Discordant Alarm (A)
+```js
+export function playMoraleCollapse(ctx) {
+  [300, 317].forEach(freq => {
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.type = 'sawtooth'; o.frequency.value = freq;
+    g.gain.setValueAtTime(0.1, ctx.currentTime);
+    g.gain.setValueAtTime(0.1, ctx.currentTime + 0.4);
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6);
+    const filt = ctx.createBiquadFilter();
+    filt.type = 'lowpass'; filt.frequency.value = 1000;
+    o.connect(filt); filt.connect(g); g.connect(ctx.destination);
+    o.start(); o.stop(ctx.currentTime + 0.65);
+  });
+}
+```
+
+---
+
+**Then in `Speranza.jsx`, add these to the import line at the top and wire them up:**
+
+- `playAssign` → call in `handleAssign` when `delta > 0`
+- `playUnassign` → call in `handleAssign` when `delta < 0`
+- `playMilestone` → call in `checkMilestones` when a milestone fires (replace or add alongside the existing milestone toast)
+- `playDilemma` → call in the tick loop when `setActiveDilemma(picked)` fires, and also call `setTimescale(0)` at that point to pause
+- `playDilemmaResolve` → call at the end of `handleDilemmaChoice`
+- `playDemolish` → call in `handleDemolish`
+- `playRepair` → call in `handleRepair`
+- `playRecruit` → call in the `+ RECRUIT` button handler
+- `playShelterAlarm` → call in `handleSoundAlarm`
+- `playSurfaceCondition` → call when surface condition rotates in the tick loop (where `setSurfaceCondition(next)` is called)
+- `playStructuralDamage` → call where structural damage log entry is added (`💥 ... took structural damage`)
+- `playBarricadesHold` → call where barricades block a raid (`setThreat(25)` / barricade success branch)
+- `playTurret` → call where Arc Turret fires in the raid strike loop
+- `playEMP` → call where EMP Array fires in the raid strike loop
+- `playAutosave` → call when autosave triggers
+- `playMoraleCollapse` → call where the morale collapse warning log entry fires
