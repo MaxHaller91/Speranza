@@ -28,6 +28,7 @@ import armorySprite from "./Assets/Buildings/Armory.png";
 import hospitalSprite from "./Assets/Buildings/Hospital.png";
 import earthTexture from "./Assets/Buildings/Earth Texture.png";
 
+import SurfaceDefense from './surface_defense';
 // ─── Constants ────────────────────────────────────────────────────────────────
 const GRID_COLS = 7;
 const GRID_ROWS = 4;
@@ -435,6 +436,8 @@ export default function Speranza() {
   const [tick,       setTick]       = useState(0);
   const [gameOver,   setGameOver]   = useState(null);
   const [raidFlash,  setRaidFlash]  = useState(false);
+  const [surfaceDefenseActive, setSurfaceDefenseActive] = useState(false);
+  const [pendingRaidSize, setPendingRaidSize] = useState(null);
   const [toasts,     setToasts]     = useState([]);
   // raidWindow: null | { sizeIdx: 0|1|2, escalations: number }
   // sizeIdx indexes into RAID_SIZE_ORDER
@@ -631,7 +634,6 @@ export default function Speranza() {
       !!activeDilemma ||
       buildMenuOpen ||
       !!milestoneToast ||
-      toasts.length > 0 ||
       journalOpen ||
       effectsOpen;
 
@@ -916,6 +918,9 @@ export default function Speranza() {
             changeMoraleRef.current(10, "barricades held");
             playBarricadesHold();
           } else {
+            setSurfaceDefenseActive(true);
+            setPendingRaidSize(sizeKey);
+            setTimescale(1);
             raidSuppressedThisRaidRef.current = 0;
             setActiveRaid({ sizeKey, ticksLeft: sizeDef.duration, strikeCountdown: sizeDef.strikeEvery });
             setRaidWindow(null);
@@ -1545,6 +1550,29 @@ export default function Speranza() {
     return () => clearInterval(interval);
   }, [timescale]); // restart interval when timescale changes
 
+  // Keybindings: space = close popups, 1-5 = timescale
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+      if (e.code === "Space") {
+        e.preventDefault();
+        setBuildMenu(false);
+        setSelected(null);
+        setJournalOpen(false);
+        setEffectsOpen(false);
+        setSelectedColonist(null);
+      }
+      if (e.key === "1") setTimescale(0);
+      if (e.key === "2") setTimescale(0.5);
+      if (e.key === "3") setTimescale(1);
+      if (e.key === "4") setTimescale(2);
+      if (e.key === "5") setTimescale(4);
+      if (e.key === "6") setTimescale(10);
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+
   // ── Warnings — edge-triggered (only log on false→true transition) ─────────
   const prevWarn = useRef({ food: false, water: false, energy: false, heat: false });
   useEffect(() => {
@@ -1706,6 +1734,49 @@ export default function Speranza() {
     });
     addLog(`🔧 ${ROOM_TYPES[cell.type].label} at [${r + 1}-${c + 1}] repaired. (-20 scrap)`);
     playRepair();
+  };
+
+  const handleSurfaceRaidWon = () => {
+    const wonSize = pendingRaidSize;
+    setSurfaceDefenseActive(false);
+    setPendingRaidSize(null);
+    setRaidWindow(null);
+    setActiveRaid(null);
+    unduckMusic();
+    playRaidOver();
+    setColonists(prev => prev.map(c => ({ ...c, raidsSurvived: (c.raidsSurvived ?? 0) + 1 })));
+    setHeat(prev => clamp(prev - 60, 0, HEAT_MAX));
+    changeMoraleRef.current(8, "raid repelled on surface");
+    addLog("⚔ Surface defenses held — raid repelled before breach!");
+    addToast("🛡 RAID REPELLED\nSurface defenses eliminated all Arc units.\nColony secure.", "success", { key: `surface-win-${tickRef.current}` });
+    setRaidsRepelled(prev => {
+      const n = prev + 1;
+      raidsRepelledRef.current = n;
+      if (n === 1) addHistoryRef.current("⚔", "First raid repelled");
+      return n;
+    });
+    if (wonSize === "large") {
+      setLargeRaidsRepelled(prev => { const n = prev + 1; largeRaidsRepelledRef.current = n; return n; });
+      addHistoryRef.current("⚔", "Large raid repelled on surface");
+    }
+    checkMilestonesRef.current({
+      raidsRepelled:        raidsRepelledRef.current,
+      largeRaidsRepelled:   largeRaidsRepelledRef.current,
+      totalDeaths:          memorialRef.current.length,
+      expeditionsCompleted: expeditionsCompletedRef.current,
+      population:           colonistsRef.current.length,
+      day:                  Math.floor(tickRef.current / 48) + 1,
+      morale:               moraleRef.current,
+      schematics:           surfaceHaulRef.current.schematics.length,
+      t3Built:              0,
+    });
+  };
+
+  const handleSurfaceRaidLost = () => {
+    setSurfaceDefenseActive(false);
+    setPendingRaidSize(null);
+    unduckMusic();
+    addLog("⚠ Surface defenses breached — Arc forces entering colony.");
   };
 
   const handleRecruit = () => {
@@ -1923,6 +1994,8 @@ export default function Speranza() {
     setFiredDilemmas([]);
     setHistoryLog([]);
     raidSuppressedThisRaidRef.current = 0;
+    setSurfaceDefenseActive(false);
+    setPendingRaidSize(null);
   };
 
   // ── Derived UI ────────────────────────────────────────────────────────────
@@ -2360,6 +2433,7 @@ export default function Speranza() {
           background: "#120d00", border: "2px solid #f5a623",
           borderRadius: 8, padding: "12px 16px",
           boxShadow: "0 0 30px #f5a62344",
+          position: "relative", zIndex: 100,
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
             <div style={{ fontSize: 16 }}>⭐</div>
@@ -2644,12 +2718,18 @@ export default function Speranza() {
       <div style={{ display: "flex", gap: 12, width: "100%", maxWidth: 920, position: "relative", zIndex: 1 }}>
 
         {/* Grid column */}
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ border: "none", boxShadow: "none", borderRadius: 6, overflow: "hidden", background: "transparent", position: "relative" }}>
+        <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
 
-            <div className="surface-bar" style={{ background: "#0a1a0a", borderBottom: "1px dashed #2a4a2a", padding: "4px 10px", fontSize: 9, color: "#3a5a3a", letterSpacing: 2, position: "relative", zIndex: 15 }}>
-              ▲ SURFACE — ARC CONTROLLED ZONE
-            </div>
+          <SurfaceDefense
+            scrap={res.scrap}
+            onScrapChange={(delta) => setRes(r => ({ ...r, scrap: Math.max(0, r.scrap + delta) }))}
+            raidSize={pendingRaidSize ?? "small"}
+            active={surfaceDefenseActive}
+            onRaidWon={handleSurfaceRaidWon}
+            onRaidLost={handleSurfaceRaidLost}
+          />
+
+          <div style={{ border: "none", boxShadow: "none", borderRadius: 6, overflow: "hidden", background: "transparent", position: "relative" }}>
 
             {grid.map((row, r) => {
               const isLocked = !unlockedRows.includes(r);
@@ -2928,7 +3008,7 @@ export default function Speranza() {
                 <svg
                   style={{
                     position: "absolute",
-                    top: SURFACE_BAR_H,
+                    top: 0,
                     left: 0,
                     width: W,
                     height: H,
