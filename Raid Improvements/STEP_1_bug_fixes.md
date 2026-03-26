@@ -1,103 +1,138 @@
 # Step 1 — Bug Fixes & Debug Cleanup
 
+## Purpose
+
+This step is the stabilization pass. Do this before adding new raid features.
+
+Follow the project rules while implementing:
+
+- re-read the file before editing it
+- do not trust old line numbers
+- make surgical edits
+- preserve `onScrapChange(delta)` semantics
+- if the tick loop reads state, use a ref mirror
+
+---
+
 ## Files Touched
+
 - `src/surface_defense.jsx`
 - `src/Speranza.jsx`
 
 ---
 
-## Fix 1: Remove Debug Raid-Size Selector
+## Ownership
 
-### Problem
-Lines 700–717 of `surface_defense.jsx` render SMALL / MEDIUM / LARGE buttons during the prep phase, letting the player freely change the raid difficulty. This is dev tooling that was never removed.
+- `src/surface_defense.jsx` owns minigame UI, local lifecycle, local debug controls, minigame-only restart affordances
+- `src/Speranza.jsx` owns main raid lifecycle, colony consequences, tick-loop strike resolution, and parent callbacks
 
-### What to delete
-The entire block at lines 700–717:
-```jsx
-{phase === "prep" && (
-  <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-    <span style={{ color: "#334", fontSize: 8, letterSpacing: 1 }}>RAID:</span>
-    {["small","medium","large"].map(sz => (
-      <button key={sz} onClick={() => resetGame(sz)} style={{ ... }}>
-        {sz} ({RAID_SIZES[sz]}W)
-      </button>
-    ))}
-  </div>
-)}
-```
-
-### After deletion
-Nothing replaces this. The `resetGame` function can stay — it's used by the RESTART button on game over. Just remove the raid-size picker UI block.
+Do not move logic into `src/components/` for this step.
 
 ---
 
-## Fix 2: Suppress Underground Strikes During Surface Defense
+## Audit Before Coding
 
-### Problem
-When a raid fires, both the surface mini-game AND the old tick-based underground strike system start simultaneously. Colonists can be injured/killed during the mini-game even if the player is actively defending. The mini-game outcome should be the only thing that matters:
-- WIN → no underground strikes, raid fully repelled
-- LOSE → hatch breached, underground strikes take over
+Before implementing anything in this step, verify in the live files:
 
-### Root Cause
-`surfaceDefenseActive` has no ref. The tick loop at ~line 1005 (`if (newStrikeCD <= 0 && newTicksLeft > 0)`) has no awareness of the mini-game state.
+1. whether the raid-size debug picker is still present
+2. whether `surfaceDefenseActiveRef` already exists
+3. whether the underground strike block is already guarded
+4. whether a post-win/post-loss restart button still exists
+5. whether the fled-colonist ghost bug is still present
 
-### Changes to `src/Speranza.jsx`
+If something is already fixed, mark it as complete and do not re-implement it.
 
-**1. Add a ref for surfaceDefenseActive** (add near the other refs, ~line 515):
-```js
-const surfaceDefenseActiveRef = useRef(false);
-useEffect(() => { surfaceDefenseActiveRef.current = surfaceDefenseActive; }, [surfaceDefenseActive]);
-```
+---
 
-**2. Guard the strike block in the tick loop** (~line 1004):
+## Current Known Scope
 
-Before (current):
-```js
-// Strike fires this tick
-if (newStrikeCD <= 0 && newTicksLeft > 0) {
-```
+This step covers four cleanup targets:
 
-After:
-```js
-// Strike fires this tick — only if surface defense is not active (mini-game handles surface phase)
-if (newStrikeCD <= 0 && newTicksLeft > 0 && !surfaceDefenseActiveRef.current) {
-```
+| Fix | Description |
+|-----|-------------|
+| 1a | Remove any dev-only raid-size selector still visible to players |
+| 1b | Suppress underground strike damage while surface defense is active |
+| 1c | Remove any dev-only restart UI that can desync state |
+| 1d | Fix the fled-colonist ghost bug |
 
-That single guard is the entire fix. While the mini-game is running, the strike clock keeps counting down (so when the hatch breaches, strikes resume at the correct cadence) but no damage actually fires.
+---
 
-**3. Verify `handleSurfaceRaidLost` behavior**
+## Fix 1a — Remove Debug Raid-Size Selector
 
-Current code (line 1775):
-```js
-const handleSurfaceRaidLost = () => {
-  setSurfaceDefenseActive(false);   // this sets ref to false → strikes resume
-  setPendingRaidSize(null);
-  unduckMusic();
-  addLog("⚠ Surface defenses breached — Arc forces entering colony.");
-};
-```
+### Intent
 
-This is already correct. When `surfaceDefenseActive` goes false, `surfaceDefenseActiveRef.current` becomes false on the next render, and the strike guard lifts. The existing `activeRaid` continues from wherever its `ticksLeft` and `strikeCountdown` are — the breach consequence kicks in automatically.
+Players should not be able to choose raid difficulty from minigame debug buttons.
 
-**4. Verify `handleSurfaceRaidWon` behavior**
+### Implementation guidance
 
-Current code (line 1739):
-```js
-const handleSurfaceRaidWon = () => {
-  setSurfaceDefenseActive(false);
-  setActiveRaid(null);   // ← kills the old system entirely
-  ...
-};
-```
+- re-read the prep-phase controls in `src/surface_defense.jsx`
+- if a SMALL / MEDIUM / LARGE picker still exists, remove only that UI block
+- do not remove the underlying reset/helper function unless the function is truly unused after the UI is gone
 
-Also already correct. No changes needed here.
+---
+
+## Fix 1b — Suppress Underground Strikes During Surface Defense
+
+### Intent
+
+While the surface minigame is active, the underground strike system should not apply damage. Only a breach should allow underground consequences to resume.
+
+### Implementation guidance
+
+In `src/Speranza.jsx`:
+
+1. identify the main strike-resolution block inside the tick loop
+2. ensure that block is gated by the current surface-defense state
+3. if the tick loop reads `surfaceDefenseActive`, confirm it uses a ref mirror rather than direct state access
+
+Preferred pattern:
+
+- `surfaceDefenseActive` state in React
+- `surfaceDefenseActiveRef` mirrored through `useEffect`
+- strike block guarded with `!surfaceDefenseActiveRef.current`
+
+---
+
+## Fix 1c — Remove Dev-Only Restart UI
+
+### Intent
+
+The player should not be able to locally restart the minigame after a won/lost outcome if doing so leaves colony state, raid state, or scrap state out of sync.
+
+### Implementation guidance
+
+In `src/surface_defense.jsx`:
+
+- re-read the post-outcome controls for `phase === "won"` and `phase === "lost"`
+- if a visible restart button exists, remove the button only
+- keep internal reset helpers if they are still used by activation/reset lifecycle
+
+---
+
+## Fix 1d — Fled Colonist Ghost Bug
+
+### Intent
+
+If a colonist flees and is recorded in the memorial, they must not remain in the active colony roster.
+
+### Implementation guidance
+
+In `src/Speranza.jsx`:
+
+1. find the raid-strike path where a colonist flees
+2. verify whether the code currently marks them idle while also adding them to the memorial
+3. if so, remove them from `colonists[]` rather than leaving them in the roster
+
+Use the same style already used elsewhere for removing dead colonists if such a pattern already exists.
 
 ---
 
 ## Verification Checklist
 
-After implementing:
-- [ ] No SMALL/MEDIUM/LARGE buttons visible to player during prep phase
-- [ ] Start a raid (trigger from heat), place defenses, intentionally lose — confirm "BREACH" message appears and then colonists start taking hits (log shows strike events)
-- [ ] Start a raid, win the mini-game — confirm NO colonist strikes fired during OR after the mini-game
-- [ ] Check that the `resetGame` button on the won/lost screen still works (it doesn't use the deleted UI, only references `raidSize` state which remains)
+- [ ] No dev-only raid-size selector is visible during prep
+- [ ] No dev-only restart button is visible after win/loss
+- [ ] Underground strikes do not resolve while `surfaceDefenseActive` is true
+- [ ] Winning the minigame fully resolves the raid without underground strikes resuming afterward
+- [ ] Losing the minigame allows underground consequences to resume through the normal parent-side lifecycle
+- [ ] A fleeing colonist is not present in both the roster and memorial
+- [ ] `onScrapChange` remains delta-based after all edits

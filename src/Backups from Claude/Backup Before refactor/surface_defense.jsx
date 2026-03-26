@@ -158,29 +158,19 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
   // sync selectedTool to ref
   useEffect(() => { selectedToolRef.current = selectedTool; }, [selectedTool]);
   const activeRef = useRef(active);
-  // Sync activeRef every render — needed by the RAF loop
-  useEffect(() => { activeRef.current = active; }, [active]);
-
-  // Keep refs to initialScrap/raidSize so the reset effect can read them
-  // without depending on them (avoids re-triggering reset on every scrap tick)
-  const initialScrapRef    = useRef(initialScrap);
-  const initialRaidSizeRef = useRef(initialRaidSize);
-  useEffect(() => { initialScrapRef.current    = initialScrap;   }, [initialScrap]);
-  useEffect(() => { initialRaidSizeRef.current = initialRaidSize; }, [initialRaidSize]);
-
-  // Reset ONLY when active transitions to true, not on every scrap change
   useEffect(() => {
-    if (!active) return;
-    const startScrap    = initialScrapRef.current;
-    const startRaidSize = initialRaidSizeRef.current;
-    const s = stateRef.current;
-    s.enemies = []; s.defenses = []; s.projectiles = [];
-    s.scrap = startScrap; s.hatchHp = 100; s.phase = "prep";
-    s.waveIdx = 0; s.totalWaves = RAID_SIZES[startRaidSize] ?? 5;
-    s.spawnQueue = []; s.spawnTimer = 0; s.tick = 0;
-    setScrap(startScrap); setHatchHp(100); setPhase("prep");
-    setWaveIdx(0); setMessage(null); setRaidSize(startRaidSize);
-  }, [active]); // ← only [active] — this breaks the feedback loop
+    activeRef.current = active;
+    if (active) {
+      // reset state for new raid
+      const s = stateRef.current;
+      s.enemies = []; s.defenses = []; s.projectiles = [];
+      s.scrap = initialScrap; s.hatchHp = 100; s.phase = "prep";
+      s.waveIdx = 0; s.totalWaves = RAID_SIZES[initialRaidSize] ?? 5;
+      s.spawnQueue = []; s.spawnTimer = 0; s.tick = 0;
+      setScrap(initialScrap); setHatchHp(100); setPhase("prep");
+      setWaveIdx(0); setMessage(null); setRaidSize(initialRaidSize);
+    }
+  }, [active, initialScrap, initialRaidSize]);
 
   const showMessage = (msg, ms = 1800) => {
     setMessage(msg);
@@ -229,7 +219,7 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
     s.defenses.push(makeDefense(x, tool));
     s.scrap -= def.cost;
     setScrap(s.scrap);
-    if (onScrapChange) onScrapChange(-def.cost);
+    if (onScrapChange) onScrapChange(s.scrap - initialScrap);
   }, []);
 
   // ─── GAME LOOP ─────────────────────────────────────────────────────────────
@@ -335,7 +325,7 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
             hit.dead = true;
             s.scrap += hit.reward;
             setScrap(s.scrap);
-            if (onScrapChange) onScrapChange(hit.reward);
+            if (onScrapChange) onScrapChange(s.scrap - initialScrap);
           }
         }
       });
@@ -353,7 +343,6 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
           const bonus = Math.round(20 + (s.hatchHp / 100) * 40);
           s.scrap += bonus;
           setScrap(s.scrap);
-          if (onScrapChange) onScrapChange(bonus);
           if (s.waveIdx >= s.totalWaves - 1) {
             s.phase = "won";
             if (onRaidWon) setTimeout(onRaidWon, 2000);
@@ -708,6 +697,24 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
           </span>
         )}
 
+        {phase === "prep" && (
+          <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+            <span style={{ color: "#334", fontSize: 8, letterSpacing: 1 }}>RAID:</span>
+            {["small","medium","large"].map(sz => (
+              <button key={sz} onClick={() => resetGame(sz)} style={{
+                fontFamily: "monospace", fontSize: 8, letterSpacing: 1,
+                padding: "3px 8px",
+                background: raidSize === sz ? "rgba(200,50,20,0.15)" : "rgba(255,255,255,0.02)",
+                border: `1px solid ${raidSize === sz ? "#cc3311" : "#1a1208"}`,
+                color: raidSize === sz ? "#ff4422" : "#334",
+                cursor: "pointer", borderRadius: 2,
+                textTransform: "uppercase",
+              }}>
+                {sz} ({RAID_SIZES[sz]}W)
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Instructions */}

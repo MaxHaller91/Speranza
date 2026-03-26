@@ -1,0 +1,118 @@
+Let me read the current Speranza.jsx structure carefully before planning, so the steps are precise rather than approximate.Now I have exact numbers. Here's the full plan:
+
+---
+
+## Complete Refactor Plan — All Remaining Phases
+
+### Current state
+`Speranza.jsx` = **3,450 lines** (game logic + all UI mixed together)
+
+---
+
+### Phase 2 — Extract pure UI components
+*These receive props and fire callbacks. Zero game logic. Safe to extract one at a time, test after each.*
+
+**Step 2a — `SkyBackground.jsx`** (~121 lines)
+Props: `tick`
+Completely self-contained — pure math and render, touches nothing else. Best first extraction because if something goes wrong it's visually obvious and affects nothing else.
+
+**Step 2b — `RaidBanner.jsx`** (~65 lines)
+Props: `activeRaid, raidWindow, radioTowerOnline, unlockedTechs`
+Read-only display. No callbacks needed.
+
+**Step 2c — `GameOverModal.jsx`** (~103 lines)
+Props: `gameOver, historyLog, memorial, onRestart`
+One callback, fully self-contained modal.
+
+**Step 2d — `DilemmaModal.jsx`** (~39 lines)
+Props: `activeDilemma, onChoice`
+Simplest modal in the file.
+
+**Step 2e — `TraitPicker.jsx`** (~39 lines)
+Props: `colonists, onPickTrait`
+Small, isolated, one callback.
+
+**Step 2f — `BuildMenu.jsx`** (~107 lines)
+Props: `res, surfaceHaul, unlockedTechs, mousePos, onBuild, onClose`
+Slightly more props but still pure display + two callbacks.
+
+**Step 2g — `ToastPanel.jsx`** (~95 lines)
+Props: `toasts, milestoneToast, timescaleBeforeToast, onDismiss, onDismissAll`
+Includes the pause indicator and dismiss-all button.
+
+**After Phase 2a–g:** All modals and overlays are gone from Speranza.jsx. **Estimated reduction: ~569 lines → file at ~2,880 lines.**
+
+---
+
+**Step 2h — `FlowPanel.jsx`** (~77 lines)
+Props: `netFlow, statBreakdown, mousePos`
+The supply/demand bars with hover breakdown tooltip.
+
+**Step 2i — `ColonistRoster.jsx`** (~144 lines)
+Props: `colonists, rosterOpen, hoveredColonist, selectedColonist, onToggleRoster, onSelectColonist, onHoverColonist`
+The collapsible roster cards below the grid.
+
+**Step 2j — `ColonyHeader.jsx`** (~176 lines)
+Props: `tick, timescale, musicVolume, res, surfaceHaul, surfaceCondition, morale, statBreakdown, colonists, grid, heat, raidWindow, journalOpen, effectsOpen, onTimescale, onMusicVolume, onRecruit, onToggleJournal, onToggleEffects`
+More props but still purely display — renders the top bar with resources, heat meter, morale bar.
+
+**Step 2k — `ColonyGrid.jsx`** (~355 lines)
+Props: `grid, unlockedRows, excavations, selected, hoveredCell, mousePos, gridMetrics, onCellClick, onStartExcavation, onAssign, onSetHoveredCell`
+The grid rows, locked rows, mortise SVG overlay. Biggest UI extraction, highest visual complexity.
+
+**Step 2l — `SidePanel.jsx`** (~427 lines)
+Props: everything the right column needs — selected cell, colonists, expeditions, journal/effects state, schematics, unlockedTechs, all the panel-specific callbacks
+The entire right column: journal, effects panel, colonist detail, room panel, expedition UI, hospital list, tech tree, shelter alarm, memorial. The largest single extraction but it's genuinely one cohesive unit (the "info panel").
+
+**After Phase 2h–l:** All JSX is gone from Speranza.jsx except the top-level layout shell (~30 lines of JSX assembling the components). **Estimated reduction: ~1,179 more lines → file at ~1,700 lines.**
+
+---
+
+**End state after all of Phase 2:**
+```
+src/
+  gameData.js           (~270 lines) ← done ✅
+  Speranza.jsx          (~1,700 lines) ← state + refs + tick loop + handlers only
+  components/
+    SkyBackground.jsx   (~121 lines)
+    RaidBanner.jsx      (~65 lines)
+    GameOverModal.jsx   (~103 lines)
+    DilemmaModal.jsx    (~39 lines)
+    TraitPicker.jsx     (~39 lines)
+    BuildMenu.jsx       (~107 lines)
+    ToastPanel.jsx      (~95 lines)
+    FlowPanel.jsx       (~77 lines)
+    ColonistRoster.jsx  (~144 lines)
+    ColonyHeader.jsx    (~176 lines)
+    ColonyGrid.jsx      (~355 lines)
+    SidePanel.jsx       (~427 lines)
+```
+
+---
+
+### Phase 3 — Extract game systems (Plan B, future)
+*Only do this once Phase 2 is stable and you feel the tick loop is limiting you.*
+
+At that point Speranza.jsx will be ~1,700 lines of pure game brain. The tick loop sections will be clearly readable and separable:
+
+```
+src/
+  systems/
+    resourceSystem.js   ← production, consumption, net flow calc (~150 lines)
+    raidSystem.js       ← heat, raid windows, strikes, T3 defenses (~350 lines)
+    expeditionSystem.js ← roll tables, outcomes, loot (~125 lines)
+    colonistSystem.js   ← healing, XP, leveling, morale collapse (~200 lines)
+    excavationSystem.js ← excavation countdown, row unlocks (~50 lines)
+```
+
+Each system would be a pure function: `(state, refs) → stateUpdates`. Speranza.jsx becomes a ~400 line coordinator that runs systems in order each tick.
+
+---
+
+### Execution rules for all phases
+1. **One component at a time** — extract, test in browser, confirm working before the next
+2. **No game features during refactor** — don't mix the two
+3. **Speranza.jsx stays runnable at every step** — never leave it in a broken intermediate state
+4. **Phase 3 is optional** — Phase 2 alone gets you 80% of the practical benefit
+
+Want to start with Step 2a (`SkyBackground.jsx`) now?

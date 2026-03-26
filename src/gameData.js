@@ -1,0 +1,405 @@
+// ─── gameData.js ─────────────────────────────────────────────────────────────
+// All pure data, constants, and stateless helpers for Speranza.
+// No React, no hooks, no side effects.
+
+import { BACKSTORIES, QUIRKS } from "../speranza-lore.js";
+
+import powerCellSprite  from "./Assets/Buildings/Power Cell.png";
+import waterPumpSprite  from "./Assets/Buildings/Water Pump.png";
+import hydroponicsSprite from "./Assets/Buildings/Hydroponics.png";
+import barracksSprite   from "./Assets/Buildings/Barracks.png";
+import armorySprite     from "./Assets/Buildings/Armory.png";
+import hospitalSprite   from "./Assets/Buildings/Hospital.png";
+import earthTexture     from "./Assets/Buildings/Earth Texture.png";
+
+export { earthTexture };
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+export const GRID_COLS = 7;
+export const GRID_ROWS = 4;
+export const TICK_MS   = 4000;
+export const MAX_RES   = 300;
+
+// ─── Heat System ──────────────────────────────────────────────────────────────
+export const HEAT_MAX              = 1000;
+export const HEAT_BASE_GAIN        = 0.6;
+export const HEAT_GAIN_PER_ROOM    = 0.35;
+export const HEAT_DECAY_PER_TICK   = 0.3;
+export const HEAT_RAID_GAIN        = 15;
+export const HEAT_SENTRY_REDUCTION = 5;
+export const HEAT_RAID_PROB_BASE   = 0.15;
+export const HEAT_RAID_PROB_SCALE  = 0.25;
+
+export const HEAT_STATES = [
+  { min: 0,   max: 199,  label: "UNDETECTED", color: "#7ed321" },
+  { min: 200, max: 399,  label: "SCANNING",   color: "#ffcc00" },
+  { min: 400, max: 599,  label: "TARGETED",   color: "#ff8800" },
+  { min: 600, max: 799,  label: "HUNTED",     color: "#ff4444" },
+  { min: 800, max: 1000, label: "MARKED",     color: "#ff0000" },
+];
+
+export const getHeatState = (h) => HEAT_STATES.find(s => h >= s.min && h <= s.max) ?? HEAT_STATES[0];
+
+export const INJURY_TICKS_BASE = 40;
+export const HEAL_RATE_NURSE   = 4;
+
+// ─── Raid Sizes ───────────────────────────────────────────────────────────────
+export const RAID_SIZES = {
+  small:  { label: "SMALL",  targets: 1, icon: "⚡", duration: 20, strikeEvery: 10 },
+  medium: { label: "MEDIUM", targets: 2, icon: "🔥", duration: 30, strikeEvery: 10 },
+  large:  { label: "LARGE",  targets: 3, icon: "💀", duration: 60, strikeEvery: 10 },
+};
+export const RAID_SIZE_ORDER  = ["small", "medium", "large"];
+export const RAID_LAUNCH_CHANCE = 0.60;
+
+// ─── T2 Tech Tree ─────────────────────────────────────────────────────────────
+export const T2_TECHS = {
+  barricades: {
+    label: "Barricades Lvl 1", icon: "🛡", cost: 50,
+    desc: "40% chance to fully block an incoming raid. Costs 15 scrap to repair after a successful block.",
+  },
+  sentryPost: {
+    label: "Sentry Post", icon: "🪖", cost: 75,
+    desc: "Unlocks the Sentry Post building. Each assigned colonist reduces Arc threat by 5/tick.",
+  },
+  radioTower: {
+    label: "Radio Tower", icon: "📡", cost: 75,
+    desc: "Unlocks the Radio Tower building. Reveals incoming raid size when the raid window opens.",
+  },
+  shelter: {
+    label: "Shelter", icon: "🏠", cost: 100,
+    desc: "Unlocks the Shelter building. Sound the alarm to protect colonists — sheltered colonists are immune to raids.",
+  },
+};
+
+// ─── Colonist Traits ──────────────────────────────────────────────────────────
+export const TRAITS = {
+  veteran:   { label: "VETERAN",    icon: "🎖", color: "#f5a623", desc: "Never flees during raids." },
+  ironLungs: { label: "IRON LUNGS", icon: "💪", color: "#ff6b9d", desc: "Heals 2× faster when injured." },
+  scavenger: { label: "SCAVENGER",  icon: "🎒", color: "#bd10e0", desc: "+50% scrap from expeditions." },
+  ghost:     { label: "GHOST",      icon: "👻", color: "#4ab3f4", desc: "50% less likely to be targeted in raids." },
+  hardened:  { label: "HARDENED",   icon: "🛡", color: "#7ed321", desc: "Injury chance reduced — 20% instead of 30%." },
+};
+export const TRAIT_KEYS = Object.keys(TRAITS);
+
+// ─── Name Pool ────────────────────────────────────────────────────────────────
+const NAME_POOL = [
+  "VASQUEZ","CHEN","OKAFOR","REYES","TAKEDA","MORROW","SOLÍS","BOREK",
+  "WADE","KIRA","DANSEN","VOLT","PATCH","ECHO","GRIM","SLATE","ROOK",
+  "YEVA","BRAND","CROSS","PIKE","SABLE","HOLT","DRAY","MACE","LUNE",
+  "TANNER","FROST","IBARRA","ZHEN","ORLOV","MARSH","CADE","WREN","JUNO",
+];
+let nameIdx = 0;
+
+function nextName() {
+  const name = NAME_POOL[nameIdx % NAME_POOL.length];
+  nameIdx++;
+  return name;
+}
+
+// Called by handleRestart — initColonists also resets internally, but export
+// this so Speranza.jsx never touches the module-level variable directly.
+export function resetNameIdx() { nameIdx = 0; }
+
+// ─── Colonist Factory ─────────────────────────────────────────────────────────
+export const COLONIST_BASE = () => ({
+  xp: 0, level: 0, traits: [], dutyTicks: 0, ticksAlive: 0, pendingTraitPick: false,
+  joinTick: 0, expeditionsCompleted: 0, raidsSurvived: 0,
+});
+
+export function makeColonist(joinTick = 0) {
+  const quirk     = QUIRKS[Math.floor(Math.random() * QUIRKS.length)];
+  const backstory = BACKSTORIES[Math.floor(Math.random() * BACKSTORIES.length)];
+  return {
+    id: `c${Date.now()}-${Math.random()}`,
+    name: nextName(),
+    status: "idle",
+    backstory,
+    quirk,
+    injuryCount: 0,
+    joinTick,
+    ...COLONIST_BASE(),
+  };
+}
+
+// ─── Room Definitions ─────────────────────────────────────────────────────────
+export const ROOM_TYPES = {
+  power: {
+    label: "Power Cell",     icon: "⚡", sprite: powerCellSprite, color: "#f5a623", bg: "#1a1200", border: "#f5a623",
+    cost: { scrap: 10 },    produces: { energy: 4 }, consumes: {}, cap: 2,
+    desc: "Generates energy to power the colony",
+  },
+  water: {
+    label: "Water Recycler", icon: "💧", sprite: waterPumpSprite, color: "#4a90e2", bg: "#00101f", border: "#4a90e2",
+    cost: { scrap: 15 },    produces: { water: 3 }, consumes: { energy: 1 }, cap: 2,
+    desc: "Recycles water, needs energy",
+  },
+  hydro: {
+    label: "Hydroponics",    icon: "🌱", sprite: hydroponicsSprite, color: "#7ed321", bg: "#0a1a00", border: "#7ed321",
+    cost: { scrap: 20 },    produces: { food: 2 }, consumes: { energy: 1, water: 1 }, cap: 2,
+    desc: "Grows food, needs energy + water",
+  },
+  workshop: {
+    label: "Workshop",       icon: "🔧", color: "#bd10e0", bg: "#10001a", border: "#bd10e0",
+    cost: { scrap: 0 },     produces: { scrap: 2 }, consumes: { energy: 1 }, cap: 2,
+    desc: "Makes scrap for construction",
+  },
+  barracks: {
+    label: "Barracks",       icon: "🛏", sprite: barracksSprite, color: "#e0b84a", bg: "#1a1200", border: "#e0b84a",
+    cost: { scrap: 25 },    produces: {}, consumes: {}, cap: 0,
+    popBonus: 2,
+    desc: "Houses colonists (+2 pop cap)",
+    special: "barracks",
+  },
+  armory: {
+    label: "Armory",         icon: "⚔️", sprite: armorySprite, color: "#ff4444", bg: "#1a0000", border: "#ff4444",
+    cost: { scrap: 40 },    produces: {}, consumes: { energy: 1 }, cap: 5,
+    desc: "Enables surface expeditions. Needs 1 armorer assigned.",
+    special: "armory",
+  },
+  hospital: {
+    label: "Hospital",       icon: "🏥", sprite: hospitalSprite, color: "#ff6b9d", bg: "#1a0010", border: "#ff6b9d",
+    cost: { scrap: 35 },    produces: {}, consumes: { energy: 1 }, cap: 2,
+    desc: "Heals injured colonists. 1 nurse treats up to 3 patients. Without nurses, healing is 4× slower.",
+    special: "hospital",
+  },
+  researchLab: {
+    label: "Research Lab",   icon: "🔬", color: "#00e5ff", bg: "#001a1f", border: "#00e5ff",
+    cost: { scrap: 45 },    produces: { rp: 1 }, consumes: { energy: 1 }, cap: 2,
+    desc: "Generates research points to unlock T2 technologies. Assign researchers to accelerate progress.",
+    special: "researchLab",
+  },
+  sentryPost: {
+    label: "Sentry Post",    icon: "🪖", color: "#e8d44d", bg: "#1a1500", border: "#e8d44d",
+    cost: { scrap: 30 },    produces: {}, consumes: {}, cap: 2,
+    desc: "Each assigned sentry reduces Arc threat by 5/tick. Sentries can be targeted in raids.",
+    special: "sentryPost", requiresTech: "sentryPost",
+  },
+  radioTower: {
+    label: "Radio Tower",    icon: "📡", color: "#4ab3f4", bg: "#001020", border: "#4ab3f4",
+    cost: { scrap: 40 },    produces: {}, consumes: { energy: 1 }, cap: 0,
+    desc: "Reveals incoming raid size when a raid window opens. Without it, raid size is unknown until it strikes.",
+    special: "radioTower", requiresTech: "radioTower",
+  },
+  shelter: {
+    label: "Shelter",        icon: "🏠", color: "#7ecfb4", bg: "#001a12", border: "#7ecfb4",
+    cost: { scrap: 50 },    produces: {}, consumes: {}, cap: 0,
+    desc: "Sound the alarm to shelter colonists. Sheltered colonists are immune to Arc strikes.",
+    special: "shelter", requiresTech: "shelter",
+  },
+  tavern: {
+    label: "Tavern",         icon: "🍺", color: "#d4a843", bg: "#1a1000", border: "#d4a843",
+    cost: { scrap: 40 },    produces: {}, consumes: { water: 1, energy: 1 }, cap: 2,
+    desc: "Boosts colony morale. Each bartender generates +1.5 morale/tick. Requires water + energy.",
+    special: "tavern",
+  },
+  diningHall: {
+    label: "Dining Hall",    icon: "🍽", color: "#e8855a", bg: "#1a0a00", border: "#e8855a",
+    cost: { scrap: 35 },    produces: {}, consumes: { food: 2, energy: 1 }, cap: 2,
+    desc: "Boosts colony morale. Each cook generates +1.5 morale/tick. Requires food + energy.",
+    special: "diningHall",
+  },
+  arcTurret: {
+    label: "Arc Turret",     icon: "🔫", color: "#ff6622", bg: "#1a0800", border: "#ff6622",
+    cost: { scrap: 60, salvage: 8, arcTech: 3 }, produces: {}, consumes: { energy: 2 }, cap: 0,
+    desc: "Automated defense. 30% chance per strike to eliminate 1 incoming Arc unit. Drains 2 energy/tick.",
+    special: "arcTurret", requiresSchematic: "turretSchematics",
+  },
+  empArray: {
+    label: "EMP Array",      icon: "⚡🔲", color: "#bb44ff", bg: "#10001a", border: "#bb44ff",
+    cost: { scrap: 80, salvage: 10, arcTech: 5 }, produces: {}, consumes: { energy: 3 }, cap: 1,
+    desc: "50% to reduce raid by 1 target. Delays next strike +3 ticks. Requires 1 operator.",
+    special: "empArray", requiresSchematic: "empSchematics",
+  },
+  blastDoors: {
+    label: "Blast Doors",    icon: "🛡", color: "#aaaaaa", bg: "#111114", border: "#aaaaaa",
+    cost: { scrap: 50, salvage: 6, arcTech: 2 }, produces: {}, consumes: {}, cap: 0,
+    desc: "Passive. 40% chance to absorb building damage targeting row 0 per strike.",
+    special: "blastDoors", requiresSchematic: "fortSchematics",
+  },
+  geothermal: {
+    label: "Geothermal Gen", icon: "🌋", color: "#ff8800", bg: "#1a0800", border: "#ff8800",
+    cost: { scrap: 70, salvage: 12, arcTech: 4 }, produces: { energy: 6 }, consumes: {}, cap: 0,
+    desc: "Passive +6 energy/tick. No workers needed. Unlocked by -40m excavation.",
+    special: "geothermal", requiresSchematic: "geoSchematics",
+  },
+  memorial: {
+    label: "Memorial Hall",  icon: "🕯", color: "#9988bb", bg: "#0a0814", border: "#9988bb",
+    cost: { scrap: 30 },    produces: {}, consumes: {}, cap: 0,
+    desc: "A place to grieve. Death morale penalty −40%. Raid morale loss −2/strike.",
+    special: "memorial",
+  },
+};
+
+// ─── Excavation Definitions ───────────────────────────────────────────────────
+export const EXCAVATION_DEFS = {
+  1: { scrap: 40,  workers: 1, ticks: 15, label: "-20m", discovery: "Old utility tunnels. Power Cell costs 5 less scrap on this level." },
+  2: { scrap: 80,  workers: 2, ticks: 25, label: "-30m", discovery: "Pre-Arc storage vaults. +60 scrap found in the rubble." },
+  3: { scrap: 150, workers: 2, ticks: 40, label: "-40m", discovery: "Deep geothermal vents detected. Geothermal Generator unlocked." },
+};
+
+// ─── Expedition Definitions ───────────────────────────────────────────────────
+export const EXPEDITION_TYPES = {
+  scav: {
+    label: "Scavenge Run", icon: "🏃", color: "#bd10e0",
+    desc: "Safe surface scavenge. Low risk, low reward.",
+    duration: 5, colonistsRequired: 1, threatDelta: 2, failChance: 0.1,
+    reward: { scrap: 25 },
+    failMsg: "returned empty-handed — close call.",
+  },
+  strike: {
+    label: "Arc Strike", icon: "💥", color: "#ff4444",
+    desc: "Attack an Arc outpost. High risk, high reward.",
+    duration: 8, colonistsRequired: 2, threatDelta: 18, failChance: 0.3,
+    reward: { scrap: 60, energy: 30 },
+    failMsg: "ambushed by Arc forces.",
+  },
+};
+
+// ─── Expedition Roll Tables ───────────────────────────────────────────────────
+export function randBetween(a, b) { return Math.floor(Math.random() * (b - a + 1)) + a; }
+
+export const EXPEDITION_ROLL_TABLES = {
+  scav: [
+    { id: "scrap_cache", weight: 35, type: "good",    label: "Found a scrap cache",         apply: () => ({ scrap: randBetween(15, 30) }) },
+    { id: "salvage",     weight: 25, type: "good",    label: "Recovered salvage",            apply: () => ({ salvage: randBetween(2, 4) }) },
+    { id: "survivor",    weight: 8,  type: "good",    label: "Encountered a survivor",       apply: () => ({ survivor: true }) },
+    { id: "nothing",     weight: 20, type: "neutral", label: "Nothing found — kept moving",  apply: () => ({}) },
+    { id: "injured",     weight: 8,  type: "bad",     label: "took a hit",                   apply: () => "injure" },
+    { id: "killed",      weight: 4,  type: "bad",     label: "was killed",                   apply: () => "kill" },
+  ],
+  strike: [
+    { id: "arc_tech",    weight: 30, type: "good",    label: "Salvaged Arc Tech components", apply: () => ({ arcTech: randBetween(1, 2) }) },
+    { id: "salvage",     weight: 25, type: "good",    label: "Recovered salvage haul",       apply: () => ({ salvage: randBetween(3, 6) }) },
+    { id: "schematic",   weight: 5,  type: "good",    label: "Found a schematic",            apply: () => ({ schematic: true }) },
+    { id: "ambush",      weight: 15, type: "neutral", label: "Ambushed — retreated empty",   apply: () => ({}) },
+    { id: "injured",     weight: 15, type: "bad",     label: "took a hit",                   apply: () => "injure" },
+    { id: "killed",      weight: 10, type: "bad",     label: "was killed",                   apply: () => "kill" },
+  ],
+};
+
+export function applyMoraleModifier(table, moraleSnapshot) {
+  const modifier = moraleSnapshot > 75 ? 1.15 : moraleSnapshot > 25 ? 1.0 : moraleSnapshot > 0 ? 0.9 : 0.8;
+  return table.map(entry => ({
+    ...entry,
+    weight: entry.type === "good" ? entry.weight * modifier
+          : entry.type === "bad"  ? entry.weight / modifier
+          : entry.weight,
+  }));
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+export const DRAIN_PER_COL = { food: 0.4, water: 0.4, energy: 0.2 };
+export function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+export const EMPTY_STAT_BREAKDOWN = { plus: [], minus: [], net: 0 };
+
+// Save safety helper: disable save/load actions during volatile raid phases
+export function isSaveLockedByRaidState({ raidWindow, activeRaid, surfaceDefenseActive, pendingRaidSize }) {
+  return !!(raidWindow || activeRaid || surfaceDefenseActive || pendingRaidSize);
+}
+
+// ─── Row-Based Raid Targeting ─────────────────────────────────────────────────
+export function weightedTargetPick(colonists, grid, sizeDef) {
+  const rowWeights = [4, 3, 2, 1];
+  const weighted = colonists.map(col => {
+    let rowIdx = 0;
+    if (col.status === "idle")           rowIdx = 0;
+    else if (col.status === "onSentry")  rowIdx = 0;
+    else if (col.status === "excavating") rowIdx = 3;
+    else if (col.status === "working") {
+      grid.forEach((row, r) => row.forEach(cell => {
+        if (cell.workers > 0) rowIdx = r;
+      }));
+    }
+    let weight = rowWeights[rowIdx] ?? 1;
+    if (col.traits?.includes("ghost")) weight *= 0.5;
+    return { col, weight };
+  });
+  const targets = [];
+  const pool = [...weighted];
+  for (let i = 0; i < sizeDef.targets && pool.length > 0; i++) {
+    const total = pool.reduce((s, w) => s + w.weight, 0);
+    let rand = Math.random() * total;
+    for (let j = 0; j < pool.length; j++) {
+      rand -= pool[j].weight;
+      if (rand <= 0) { targets.push(pool[j].col); pool.splice(j, 1); break; }
+    }
+  }
+  return targets;
+}
+
+// ─── Grid Factory ─────────────────────────────────────────────────────────────
+export function makeGrid() {
+  return Array.from({ length: GRID_ROWS }, (_, r) =>
+    Array.from({ length: GRID_COLS }, (_, c) => ({ id: `${r}-${c}`, type: null, workers: 0, damaged: false }))
+  );
+}
+
+export function initColonists() {
+  nameIdx = 0; // reset name counter for fresh colony
+  return [
+    { id: "c0", name: nextName(), status: "working", backstory: BACKSTORIES[0], quirk: QUIRKS[0], injuryCount: 0, ...COLONIST_BASE() },
+    { id: "c1", name: nextName(), status: "working", backstory: BACKSTORIES[1], quirk: QUIRKS[1], injuryCount: 0, ...COLONIST_BASE() },
+    { id: "c2", name: nextName(), status: "idle",    backstory: BACKSTORIES[2], quirk: QUIRKS[2], injuryCount: 0, ...COLONIST_BASE() },
+  ];
+}
+
+export function initGrid() {
+  const g = makeGrid();
+  g[0][0] = { id: "0-0", type: "workshop", workers: 1, damaged: false };
+  g[0][1] = { id: "0-1", type: "power",    workers: 1, damaged: false };
+  g[0][2] = { id: "0-2", type: "barracks", workers: 0, damaged: false };
+  return g;
+}
+
+export const INIT_RES = { energy: 80, food: 60, water: 60, scrap: 50, rp: 0 };
+
+// ─── Status display maps ──────────────────────────────────────────────────────
+export const STATUS_COLOR = {
+  idle:         "#7ed321",
+  working:      "#4ab3f4",
+  onExpedition: "#f5a623",
+  injured:      "#ff4444",
+  onSentry:     "#e8d44d",
+  sheltered:    "#7ecfb4",
+  excavating:   "#a0522d",
+};
+export const STATUS_LABEL = {
+  idle:         "IDLE",
+  working:      "ON DUTY",
+  onExpedition: "DEPLOYED",
+  injured:      "INJURED",
+  onSentry:     "ON SENTRY",
+  sheltered:    "SHELTERED",
+  excavating:   "EXCAVATING",
+};
+
+// ─── Time helpers ─────────────────────────────────────────────────────────────
+export function tickToDayHour(t) {
+  const day = Math.floor(t / 48) + 1;
+  const halfHours = t % 48;
+  const hour = String(Math.floor(halfHours / 2)).padStart(2, "0");
+  const min  = halfHours % 2 === 1 ? "30" : "00";
+  return `DAY ${day} · ${hour}:${min}`;
+}
+
+// ─── Milestone trigger checker ────────────────────────────────────────────────
+export function checkMilestoneTrigger(trigger, snap) {
+  if (trigger.raidsRepelled        !== undefined && snap.raidsRepelled        < trigger.raidsRepelled)        return false;
+  if (trigger.totalDeaths          !== undefined && snap.totalDeaths          < trigger.totalDeaths)          return false;
+  if (trigger.expeditionsCompleted !== undefined && snap.expeditionsCompleted < trigger.expeditionsCompleted) return false;
+  if (trigger.population           !== undefined && snap.population           < trigger.population)           return false;
+  if (trigger.day                  !== undefined && snap.day                  < trigger.day)                  return false;
+  if (trigger.schematics           !== undefined && snap.schematics           < trigger.schematics)           return false;
+  if (trigger.t3Built              !== undefined && snap.t3Built              < trigger.t3Built)              return false;
+  if (trigger.morale               !== undefined && snap.morale               < trigger.morale)               return false;
+  if (trigger.moraleLow            !== undefined && snap.morale               > trigger.moraleLow)            return false;
+  if (trigger.largeRaidsRepelled   !== undefined && snap.largeRaidsRepelled   < trigger.largeRaidsRepelled)   return false;
+  if (trigger.commandersKilled     !== undefined && (snap.commandersKilled  ?? 0) < trigger.commandersKilled) return false;
+  if (trigger.harvestersDestroyed  !== undefined && (snap.harvestersDestroyed ?? 0) < trigger.harvestersDestroyed) return false;
+  if (trigger.tradersVisited       !== undefined && (snap.tradersVisited    ?? 0) < trigger.tradersVisited)   return false;
+  if (trigger.level5Colonists      !== undefined && (snap.level5Colonists   ?? 0) < trigger.level5Colonists)  return false;
+  if (trigger.artifacts            !== undefined && (snap.artifacts         ?? 0) < trigger.artifacts)        return false;
+  if (trigger.directivesActive     !== undefined && (snap.directivesActive  ?? 0) < trigger.directivesActive) return false;
+  return true;
+}

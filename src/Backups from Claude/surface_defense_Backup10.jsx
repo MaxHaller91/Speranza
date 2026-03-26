@@ -120,7 +120,7 @@ const WAVES = [
   [{ type: "heavy", side: "left", count: 2, interval: 100 }, { type: "runner", side: "right", count: 5, interval: 30 }, { type: "grunt", side: "left", count: 4, interval: 50 }],
 ];
 
-export default function SurfaceDefense({ active = true, scrap: initialScrap = 80, onScrapChange, raidSize: initialRaidSize = "medium", onRaidWon, onRaidLost }) {
+export default function SurfaceDefense({ scrap: initialScrap = 80, onScrapChange, raidSize: initialRaidSize = "medium", dLost }) {
   const [phase, setPhase] = useState("prep"); // prep | combat | won | lost
   const [scrap, setScrap] = useState(initialScrap);
   const [hatchHp, setHatchHp] = useState(100);
@@ -157,30 +157,6 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
 
   // sync selectedTool to ref
   useEffect(() => { selectedToolRef.current = selectedTool; }, [selectedTool]);
-  const activeRef = useRef(active);
-  // Sync activeRef every render — needed by the RAF loop
-  useEffect(() => { activeRef.current = active; }, [active]);
-
-  // Keep refs to initialScrap/raidSize so the reset effect can read them
-  // without depending on them (avoids re-triggering reset on every scrap tick)
-  const initialScrapRef    = useRef(initialScrap);
-  const initialRaidSizeRef = useRef(initialRaidSize);
-  useEffect(() => { initialScrapRef.current    = initialScrap;   }, [initialScrap]);
-  useEffect(() => { initialRaidSizeRef.current = initialRaidSize; }, [initialRaidSize]);
-
-  // Reset ONLY when active transitions to true, not on every scrap change
-  useEffect(() => {
-    if (!active) return;
-    const startScrap    = initialScrapRef.current;
-    const startRaidSize = initialRaidSizeRef.current;
-    const s = stateRef.current;
-    s.enemies = []; s.defenses = []; s.projectiles = [];
-    s.scrap = startScrap; s.hatchHp = 100; s.phase = "prep";
-    s.waveIdx = 0; s.totalWaves = RAID_SIZES[startRaidSize] ?? 5;
-    s.spawnQueue = []; s.spawnTimer = 0; s.tick = 0;
-    setScrap(startScrap); setHatchHp(100); setPhase("prep");
-    setWaveIdx(0); setMessage(null); setRaidSize(startRaidSize);
-  }, [active]); // ← only [active] — this breaks the feedback loop
 
   const showMessage = (msg, ms = 1800) => {
     setMessage(msg);
@@ -229,7 +205,7 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
     s.defenses.push(makeDefense(x, tool));
     s.scrap -= def.cost;
     setScrap(s.scrap);
-    if (onScrapChange) onScrapChange(-def.cost);
+    if (onScrapChange) onScrapChange(s.scrap - initialScrap);
   }, []);
 
   // ─── GAME LOOP ─────────────────────────────────────────────────────────────
@@ -237,30 +213,8 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
     const canvas = canvasRef.current;
     const ctx = canvas.getContext("2d");
 
-    const loop = () => {
-      const s = stateRef.current;
-      s.tick++;
-
-      if (!activeRef.current) {
-        rafRef.current = requestAnimationFrame(loop);
-        return;
-      }
-
-      // ── SPAWN ──
-      if (s.phase === "combat") {
-        s.spawnTimer++;
-        const toSpawn = s.spawnQueue.filter(q => q.delay <= s.spawnTimer && !q.spawned);
-        toSpawn.forEach(q => {
-          s.enemies.push(makeEnemy(q.side, q.type));
-          q.spawned = true;
-        });
-      }
-
-      // ── ENEMIES move + attack ──
-      s.enemies.forEach(en => {
-        if (en.dead) return;
-
-        // Check if blocked by barricade or other enemy
+    const loop = () => = "combat") {
+      spawnTsEs ten.dedr // Check if blocked by barricade or other enemy
         const blocking = s.defenses.find(d =>
           !d.dead && d.type === "barricade" &&
           Math.abs(d.x - en.x) < 20 && Math.sign(d.x - en.x) === en.dir
@@ -335,7 +289,7 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
             hit.dead = true;
             s.scrap += hit.reward;
             setScrap(s.scrap);
-            if (onScrapChange) onScrapChange(hit.reward);
+            if (onScrapChange) onScrapChange(s.scrap - initialScrap);
           }
         }
       });
@@ -353,7 +307,6 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
           const bonus = Math.round(20 + (s.hatchHp / 100) * 40);
           s.scrap += bonus;
           setScrap(s.scrap);
-          if (onScrapChange) onScrapChange(bonus);
           if (s.waveIdx >= s.totalWaves - 1) {
             s.phase = "won";
             if (onRaidWon) setTimeout(onRaidWon, 2000);
@@ -564,28 +517,23 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
 
   return (
     <div style={{
-      background: "transparent",
+      background: "#030609",
+      minHeight: "100vh",
       display: "flex",
       flexDirection: "column",
       alignItems: "center",
+      justifyContent: "center",
       gap: 0,
       fontFamily: "monospace",
     }}>
-      {/* When inactive: just show the surface label bar */}
-      {!active && (
-        <div className="surface-bar" style={{ width: "100%", background: "#0a1a0a", borderBottom: "1px dashed #2a4a2a", padding: "4px 10px", fontSize: 9, color: "#3a5a3a", letterSpacing: 2 }}>
-          ▲ SURFACE — ARC CONTROLLED ZONE
-        </div>
-      )}
-
-      {/* Canvas — always mounted for RAF loop, hidden when inactive */}
+      {/* Canvas — sky at top, ground at bottom */}
       <canvas
         ref={canvasRef}
         width={W}
         height={H}
         onClick={handleCanvasClick}
         style={{
-          display: active ? "block" : "none",
+          display: "block",
           cursor: phase === "prep" ? "crosshair" : "default",
           width: "100%",
           maxWidth: W,
@@ -593,9 +541,6 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
           borderBottom: "none",
         }}
       />
-
-      {/* When active: combat controls */}
-      {active && (<>
 
       {/* Surface bar — sits at the BOTTOM like Speranza, colony is below */}
       <div style={{
@@ -634,116 +579,129 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
         {/* Scrap */}
         <div style={{ color: "#a855f7", fontSize: 10, letterSpacing: 1, minWidth: 80 }}>
           🔧 SCRAP: {scrap}
+        </di
+iv style={{ color: hatchHp < 40 ? "#cc2200" : "#22cc44", fontSize: 10, letterSpacing: 1, minWidth: 100 }}>
+      ▼ HATCH: {hatchHp}%
+    </div>
+
+       {Wave progress */}
+     <di style={{ display: "flex", gap: 3, alignItems: "center" }}>
+      {Array.from({ length: stateRef.current.totalWaves }).map((_, i) => (
+        <div key={i} style={{
+          width: 8, height: 8,
+          borderRadius: 1,
+          background: i < waveIdx ? "#22cc4488"
+            : i === waveIdx ? "#ff4422"
+            : "#1a1208",
+          border: `1px solid ${i === waveIdx ? "#ff4422" : "#222"}`,
+          transition: "background 0.3s",
+        }} />
+        }
         </div>
 
-        {/* Hatch HP */}
-        <div style={{ color: hatchHp < 40 ? "#cc2200" : "#22cc44", fontSize: 10, letterSpacing: 1, minWidth: 100 }}>
-          ▼ HATCH: {hatchHp}%
-        </div>
+      <d style={{ width: 1, height: 20, background: "#222" }} />
 
-        {/* Wave progress */}
-        <div style={{ display: "flex", gap: 3, alignItems: "center" }}>
-          {Array.from({ length: stateRef.current.totalWaves }).map((_, i) => (
-            <div key={i} style={{
-              width: 8, height: 8,
-              borderRadius: 1,
-              background: i < waveIdx ? "#22cc4488"
-                : i === waveIdx ? "#ff4422"
-                : "#1a1208",
-              border: `1px solid ${i === waveIdx ? "#ff4422" : "#222"}`,
-              transition: "background 0.3s",
-            }} />
-          ))}
-        </div>
-
-        <div style={{ width: 1, height: 20, background: "#222" }} />
-
-        {/* Defense picker */}
+    {/* Defense picker */}
         {phase === "prep" && Object.entries(DEFENSE_TYPES).map(([key, def]) => (
-          <button key={key} onClick={() => setSelectedTool(key)} style={{
-            fontFamily: "monospace", fontSize: 8, letterSpacing: 1,
-            padding: "4px 8px",
-            background: selectedTool === key ? `${def.color}22` : "rgba(255,255,255,0.03)",
-            border: `1px solid ${selectedTool === key ? def.color : "#222"}`,
-            color: selectedTool === key ? def.color : "#445",
-            cursor: "pointer",
-            borderRadius: 2,
-          }}>
-            {def.label} ({def.cost}⚙)
-          </button>
-        ))}
+        utton key={key} onClick={() => setSelectedTool(key)} style={{
+        fontFamily: "monospace", fontSize: 8, letterSpacing: 1,
+          dding: "4px 8px",
+         bacground: selectedTool === key ? `${def.color}22` : "rgba(255,255,255,0.03)",
+          bord: `1px solid ${selectedTool === key ? def.color : "#222"}`,
+           col selectedTool === key ? def.color : "#445",
+          curs: "pointer",
+         borderRdius: 2,
+      }}>
+            {dabel} ({def.cost}⚙)
+         </but>
+      ))}
 
-        <div style={{ flex: 1 }} />
+    <div style={{ flex: 1 }} />
 
-        {/* Action button */}
+        Action button */}
         {phase === "prep" && (
-          <button onClick={() => startWave(stateRef.current.waveIdx)} style={{
-            fontFamily: "monospace", fontSize: 9, letterSpacing: 2,
-            padding: "5px 16px",
-            background: "rgba(200,50,20,0.15)",
-            border: "1px solid #cc3311",
-            color: "#ff4422",
-            cursor: "pointer",
-            borderRadius: 2,
-          }}>
-            ▶ SEND WAVE {waveIdx + 1}
-          </button>
+        utton onClick={() => startWave(stateRef.current.waveIdx)} style={{
+        fontFamily: "monospace", fontSize: 9, letterSpacing: 2,
+        padding: "5px 16px",
+            ground: "rgba(200,50,20,0.15)",
+           ber: "1px solid #cc3311",
+         colr: "#ff4422",
+        cursor: "pointer",
+            erRadius: 2,
+         }}>
+          ▶ ND WAVE {waveIdx + 1}
+      </button>
         )}
-        {(phase === "won" || phase === "lost") && (
-          <button onClick={resetGame} style={{
+       {(pe === "won" || phase === "lost") && (
+        utton onClick={resetGame} style={{
             fontFamily: "monospace", fontSize: 9, letterSpacing: 2,
-            padding: "5px 16px",
+        padding: "5px 16px",
             background: "rgba(74,179,244,0.1)",
-            border: "1px solid #4ab3f4",
-            color: "#4ab3f4",
-            cursor: "pointer",
-            borderRadius: 2,
-          }}>
-            ↺ RESTART
-          </button>
-        )}
-        {phase === "combat" && (
-          <span style={{ color: "#cc3311", fontSize: 9, letterSpacing: 2, animation: "pulse 1s infinite" }}>
-            ● RAID IN PROGRESS
-          </span>
-        )}
-
-      </div>
-
-      {/* Instructions */}
-      <div style={{ width: W, padding: "6px 12px", background: "#050403", border: "1px solid #111", borderTop: "none" }}>
-        <div style={{ color: "#223", fontSize: 8, letterSpacing: 1 }}>
-          {phase === "prep"
-            ? "CLICK SURFACE TO PLACE DEFENSES · TURRETS AUTO-FIRE · BARRICADES BLOCK · MISSILES LONG RANGE"
-            : phase === "combat" ? "DEFEND THE HATCH · EARN SCRAP FROM KILLS"
-            : phase === "won" ? "ALL THREATS NEUTRALIZED — COLONY SECURE"
-            : "HATCH BREACHED — COLONY TAKING RAID DAMAGE"}
-        </div>
-      </div>
-
-      {/* Floating message */}
-      {message && (
-        <div style={{
-          position: "fixed",
-          top: "50%", left: "50%",
-          transform: "translate(-50%, -50%)",
-          background: "rgba(0,0,0,0.85)",
-          border: "1px solid #cc3311",
-          color: "#ff4422",
-          fontFamily: "monospace",
-          fontSize: 13, letterSpacing: 3,
-          padding: "10px 24px",
-          pointerEvents: "none",
-          zIndex: 100,
-        }}>
-          {message}
-        </div>
+        border: "1px solid #4ab3f4",
+        color: "#4ab3f4",
+          rsor: "pointer",
+          boerRadius: 2,
+       }}>
+          ↺ START
+         </bon>
+      )}
+     {phase == "combat" && (
+      <span style={{ color: "#cc3311", fontSize: 9, letterSpacing: 2, animation: "pulse 1s infinite" }}>
+          RAID IN PROGRESS
+         </s>
       )}
 
-      <style>{`
+    {phase === "prep" && (
+           style={{ display: "flex", gap: 4, alignItems: "center" }}>
+          <sn style={{ color: "#334", fontSize: 8, letterSpacing: 1 }}>RAID:</span>
+         {["mall","medium","large"].map(sz => (
+          <button key={sz} onClick={() => resetGame(sz)} style={{
+            fontFamily: "monospace", fontSize: 8, letterSpacing: 1,
+            padding: "3px 8px",
+            background: raidSize === sz ? "rgba(200,50,20,0.15)" : "rgba(255,255,255,0.02)",
+            border: `1px solid ${raidSize === sz ? "#cc3311" : "#1a1208"}`,
+            color: raidSize === sz ? "#ff4422" : "#334",
+            cursor: "pointer", borderRadius: 2,
+            textTransform: "uppercase",
+          }}>
+            {sz} ({RAID_SIZES[sz]}W)
+          </button>
+           )
+        </v>
+     )}
+      </div>
+
+      {/* ructions */}
+     <div st={{ width: W, padding: "6px 12px", background: "#050403", border: "1px solid #111", borderTop: "none" }}>
+      <div sle={{ color: "#223", fontSize: 8, letterSpacing: 1 }}>
+      {phase === "prep"
+            ? "C SURFACE TO PLACE DEFENSES · TURRETS AUTO-FIRE · BARRICADES BLOCK · MISSILES LONG RANGE"
+           : pha=== "combat" ? "DEFEND THE HATCH · EARN SCRAP FROM KILLS"
+          : phas=== "won" ? "ALL THREATS NEUTRALIZED — COLONY SECURE"
+         : "HATC BREACHED — COLONY TAKING RAID DAMAGE"}
+    </div>
+      </div>
+
+    {/* Floati message */}
+   {message && (
+      <div sty={{
+         poson: "fixed",
+        to "50%", left: "50%",
+       tansform: "translate(-50%, -50%)",
+      background: "rgba(0,0,0,0.85)",
+          border: "1px solid #cc3311",
+      color: "#ff4422",
+      fontFamily: "monospace",
+        ntSize: 13, letterSpacing: 3,
+       pading: "10px 24px",
+      pointerEvents: "none",
+          zI: 100,
+      }}>
+       {messge}
+    </div>
+      tyle>{`
         @keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:0.4 } }
       `}</style>
-      </>)}
     </div>
   );
 }

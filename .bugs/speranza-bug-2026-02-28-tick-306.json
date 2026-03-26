@@ -1,0 +1,910 @@
+{
+  "description": "Volt Killed in action before raid game finishes",
+  "timestamp": "2026-02-28T19:55:12.922Z",
+  "tick": 306,
+  "day": 6,
+  "recentHistory": [
+    {
+      "tick": 296,
+      "heat": 1000,
+      "morale": 100,
+      "activeRaid": true,
+      "raidWindow": null,
+      "surfaceDefenseActive": true,
+      "res": {
+        "energy": 34.93999999999962,
+        "food": 250.92000000000147,
+        "water": 292.98,
+        "scrap": 300,
+        "rp": 0
+      },
+      "colonistStatuses": {
+        "VASQUEZ": "working",
+        "CHEN": "working",
+        "OKAFOR": "working",
+        "REYES": "working",
+        "TAKEDA": "working",
+        "SOLÍS": "working",
+        "BOREK": "working",
+        "WADE": "working",
+        "KIRA": "working",
+        "DANSEN": "working",
+        "VOLT": "working",
+        "PATCH": "idle",
+        "ECHO": "working"
+      },
+      "toastsFired": []
+    },
+    {
+      "tick": 297,
+      "heat": 1000,
+      "morale": 100,
+      "activeRaid": true,
+      "raidWindow": null,
+      "surfaceDefenseActive": true,
+      "res": {
+        "energy": 34.33999999999962,
+        "food": 251.80000000000146,
+        "water": 292.98,
+        "scrap": 300,
+        "rp": 0
+      },
+      "colonistStatuses": {
+        "VASQUEZ": "working",
+        "CHEN": "working",
+        "OKAFOR": "working",
+        "REYES": "working",
+        "TAKEDA": "working",
+        "SOLÍS": "working",
+        "BOREK": "working",
+        "WADE": "working",
+        "KIRA": "working",
+        "DANSEN": "working",
+        "VOLT": "working",
+        "PATCH": "idle",
+        "ECHO": "working"
+      },
+      "toastsFired": []
+    },
+    {
+      "tick": 298,
+      "heat": 1000,
+      "morale": 100,
+      "activeRaid": true,
+      "raidWindow": null,
+      "surfaceDefenseActive": true,
+      "res": {
+        "energy": 33.73999999999962,
+        "food": 252.68000000000146,
+        "water": 292.98,
+        "scrap": 300,
+        "rp": 0
+      },
+      "colonistStatuses": {
+        "VASQUEZ": "working",
+        "CHEN": "working",
+        "OKAFOR": "working",
+        "REYES": "working",
+        "TAKEDA": "working",
+        "SOLÍS": "working",
+        "BOREK": "working",
+        "WADE": "working",
+        "KIRA": "working",
+        "DANSEN": "working",
+        "VOLT": "working",
+        "PATCH": "idle",
+        "ECHO": "working"
+      },
+      "toastsFired": []
+    },
+    {
+      "tick": 299,
+      "heat": 1000,
+      "morale": 100,
+      "activeRaid": true,
+      "raidWindow": null,
+      "surfaceDefenseActive": true,
+      "res": {
+        "energy": 33.13999999999962,
+        "food": 253.56000000000145,
+        "water": 292.98,
+        "scrap": 300,
+        "rp": 0
+      },
+      "colonistStatuses": {
+        "VASQUEZ": "working",
+        "CHEN": "working",
+        "OKAFOR": "working",
+        "REYES": "working",
+        "TAKEDA": "working",
+        "SOLÍS": "working",
+        "BOREK": "working",
+        "WADE": "working",
+        "KIRA": "working",
+        "DANSEN": "working",
+        "VOLT": "working",
+        "PATCH": "idle",
+        "ECHO": "working"
+      },
+      "toastsFired": [
+        "raid_toast",
+        "raid_toast"
+      ]
+    },
+    {
+      "tick": 300,
+      "heat": 1000,
+      "morale": 77,
+      "activeRaid": true,
+      "raidWindow": null,
+      "surfaceDefenseActive": true,
+      "res": {
+        "energy": 32.539999999999615,
+        "food": 254.44000000000145,
+        "water": 292.98,
+        "scrap": 300,
+        "rp": 0
+      },
+      "colonistStatuses": {
+        "VASQUEZ": "working",
+        "CHEN": "working",
+        "OKAFOR": "working",
+        "REYES": "working",
+        "TAKEDA": "working",
+        "SOLÍS": "idle",
+        "BOREK": "working",
+        "WADE": "working",
+        "KIRA": "working",
+        "DANSEN": "working",
+        "PATCH": "idle",
+        "ECHO": "working",
+        "SLATE": "idle"
+      },
+      "toastsFired": []
+    },
+    {
+      "tick": 301,
+      "heat": 1000,
+      "morale": 76.89999999999999,
+      "activeRaid": true,
+      "raidWindow": null,
+      "surfaceDefenseActive": true,
+      "res": {
+        "energy": 34.079999999999615,
+        "food": 255.32000000000144,
+        "water": 294.08,
+        "scrap": 300,
+        "rp": 0
+      },
+      "colonistStatuses": {
+        "VASQUEZ": "working",
+        "CHEN": "working",
+        "OKAFOR": "working",
+        "REYES": "working",
+        "TAKEDA": "working",
+        "SOLÍS": "idle",
+        "BOREK": "working",
+        "WADE": "working",
+        "KIRA": "working",
+        "DANSEN": "working",
+        "PATCH": "idle",
+        "ECHO": "working",
+        "SLATE": "idle"
+      },
+      "toastsFired": []
+    },
+    {
+      "tick": 302,
+      "heat": 1000,
+      "morale": 76.79999999999998,
+      "activeRaid": true,
+      "raidWindow": null,
+      "surfaceDefenseActive": true,
+      "res": {
+        "energy": 35.619999999999614,
+        "food": 256.2000000000014,
+        "water": 294.08,
+        "scrap": 300,
+        "rp": 0
+      },
+      "colonistStatuses": {
+        "VASQUEZ": "working",
+        "CHEN": "working",
+        "OKAFOR": "working",
+        "REYES": "working",
+        "TAKEDA": "working",
+        "SOLÍS": "idle",
+        "BOREK": "working",
+        "WADE": "working",
+        "KIRA": "working",
+        "DANSEN": "working",
+        "PATCH": "idle",
+        "ECHO": "working",
+        "SLATE": "idle"
+      },
+      "toastsFired": []
+    },
+    {
+      "tick": 303,
+      "heat": 1000,
+      "morale": 76.69999999999997,
+      "activeRaid": true,
+      "raidWindow": null,
+      "surfaceDefenseActive": true,
+      "res": {
+        "energy": 37.15999999999961,
+        "food": 253.88000000000142,
+        "water": 294.08,
+        "scrap": 300,
+        "rp": 0
+      },
+      "colonistStatuses": {
+        "VASQUEZ": "working",
+        "CHEN": "working",
+        "OKAFOR": "working",
+        "REYES": "working",
+        "TAKEDA": "working",
+        "SOLÍS": "idle",
+        "BOREK": "working",
+        "WADE": "working",
+        "KIRA": "working",
+        "DANSEN": "working",
+        "PATCH": "idle",
+        "ECHO": "working",
+        "SLATE": "idle"
+      },
+      "toastsFired": []
+    },
+    {
+      "tick": 304,
+      "heat": 1000,
+      "morale": 76.59999999999997,
+      "activeRaid": true,
+      "raidWindow": null,
+      "surfaceDefenseActive": true,
+      "res": {
+        "energy": 38.69999999999961,
+        "food": 251.56000000000142,
+        "water": 294.08,
+        "scrap": 300,
+        "rp": 0
+      },
+      "colonistStatuses": {
+        "VASQUEZ": "working",
+        "CHEN": "working",
+        "OKAFOR": "working",
+        "REYES": "working",
+        "TAKEDA": "working",
+        "SOLÍS": "idle",
+        "BOREK": "working",
+        "WADE": "working",
+        "KIRA": "working",
+        "DANSEN": "working",
+        "PATCH": "idle",
+        "ECHO": "working",
+        "SLATE": "idle"
+      },
+      "toastsFired": []
+    },
+    {
+      "tick": 305,
+      "heat": 1000,
+      "morale": 76.49999999999996,
+      "activeRaid": true,
+      "raidWindow": null,
+      "surfaceDefenseActive": true,
+      "res": {
+        "energy": 40.23999999999961,
+        "food": 249.24000000000143,
+        "water": 294.08,
+        "scrap": 300,
+        "rp": 0
+      },
+      "colonistStatuses": {
+        "VASQUEZ": "working",
+        "CHEN": "working",
+        "OKAFOR": "working",
+        "REYES": "working",
+        "TAKEDA": "working",
+        "SOLÍS": "idle",
+        "BOREK": "working",
+        "WADE": "working",
+        "KIRA": "working",
+        "DANSEN": "working",
+        "PATCH": "idle",
+        "ECHO": "working",
+        "SLATE": "idle"
+      },
+      "toastsFired": []
+    }
+  ],
+  "lastLogEntries": [
+    "[DAY 7 · 06:30] 🌍 SURFACE CONDITION: 🌨️ COLD SNAP — Temperature well below survivable without protection. Gear up before going topside.",
+    "[DAY 7 · 06:00] 📋 stranger_at_door: \"Let them in\" — They collapse and sleep for hours. When they wake, they get to work without being asked.",
+    "[DAY 7 · 05:30] 📉 Morale -20 — colonist killed",
+    "[DAY 7 · 05:30] 💢 🔥 ARC STRIKE — VOLT was KILLED.",
+    "[DAY 7 · 05:30] 💢 🔥 ARC STRIKE — SOLÍS fled their post!",
+    "[DAY 7 · 00:30] ⚔ 🔥 MEDIUM RAID UNDERWAY — 30 ticks! First strike in 10.",
+    "[DAY 7 · 00:00] ☢ ⚠ MARKED — Arc forces detected — raid incoming!",
+    "[DAY 7 · 00:00] 🔮 OKAFOR's instincts are firing. Something is coming.",
+    "[DAY 7 · 00:00] ☢ ⚠ MARKED — Arc forces detected — raid incoming!",
+    "[DAY 6 · 10:30] ⛏ -30m excavation complete! Pre-Arc storage vaults. +60 scrap found in the rubble.",
+    "[DAY 6 · 10:00] 💪 SOLÍS gained trait: IRON LUNGS",
+    "[DAY 6 · 09:30] 🌍 SURFACE CONDITION: ☀️ CLEAR — Scouts report quiet topside. Standard visibility. Arc activity within expected range.",
+    "[DAY 6 · 09:30] ⭐ SOLÍS reached Level 1! Trait selection available.",
+    "[DAY 6 · 09:30] ⭐ SOLÍS reached Level 1! Trait selection available.",
+    "[DAY 6 · 04:00] 👤 ECHO assigned to Tavern",
+    "[DAY 5 · 23:00] 🎒 TAKEDA gained trait: SCAVENGER",
+    "[DAY 5 · 22:30] ⭐ TAKEDA reached Level 1! Trait selection available.",
+    "[DAY 5 · 22:30] ⭐ TAKEDA reached Level 1! Trait selection available.",
+    "[DAY 5 · 22:00] 🧍 ECHO joined from surface survivors!",
+    "[DAY 5 · 16:30] 📋 arc_tech_temptation: \"Study it — don't install\" — Three ticks of research. You improve your Radio Tower sensitivity."
+  ],
+  "fullState": {
+    "res": {
+      "energy": 41.77999999999961,
+      "food": 246.92000000000144,
+      "water": 294.08,
+      "scrap": 300,
+      "rp": 0
+    },
+    "heat": 1000,
+    "morale": 76.39999999999995,
+    "grid": [
+      [
+        {
+          "id": "0-0",
+          "type": "workshop",
+          "workers": 0,
+          "damaged": false
+        },
+        {
+          "id": "0-1",
+          "type": "power",
+          "workers": 2,
+          "damaged": false
+        },
+        {
+          "id": "0-2",
+          "type": "barracks",
+          "workers": 0,
+          "damaged": false
+        },
+        {
+          "id": "0-3",
+          "type": "hydro",
+          "workers": 2,
+          "damaged": false
+        },
+        {
+          "id": "0-4",
+          "type": "water",
+          "workers": 2,
+          "damaged": false
+        },
+        {
+          "id": "0-5",
+          "type": "barracks",
+          "workers": 0,
+          "damaged": false
+        },
+        {
+          "id": "0-6",
+          "type": "tavern",
+          "workers": 1,
+          "damaged": false
+        }
+      ],
+      [
+        {
+          "id": "1-0",
+          "type": "barracks",
+          "workers": 0,
+          "damaged": false
+        },
+        {
+          "id": "1-1",
+          "type": "power",
+          "workers": 1,
+          "damaged": false
+        },
+        {
+          "id": "1-2",
+          "type": "armory",
+          "workers": 0,
+          "damaged": false
+        },
+        {
+          "id": "1-3",
+          "type": "hydro",
+          "workers": 1,
+          "damaged": false
+        },
+        {
+          "id": "1-4",
+          "type": "water",
+          "workers": 2,
+          "damaged": false
+        },
+        {
+          "id": "1-5",
+          "type": "barracks",
+          "workers": 0,
+          "damaged": false
+        },
+        {
+          "id": "1-6",
+          "type": "barracks",
+          "workers": 0,
+          "damaged": false
+        }
+      ],
+      [
+        {
+          "id": "2-0",
+          "type": null,
+          "workers": 0,
+          "damaged": false
+        },
+        {
+          "id": "2-1",
+          "type": null,
+          "workers": 0,
+          "damaged": false
+        },
+        {
+          "id": "2-2",
+          "type": null,
+          "workers": 0,
+          "damaged": false
+        },
+        {
+          "id": "2-3",
+          "type": null,
+          "workers": 0,
+          "damaged": false
+        },
+        {
+          "id": "2-4",
+          "type": null,
+          "workers": 0,
+          "damaged": false
+        },
+        {
+          "id": "2-5",
+          "type": null,
+          "workers": 0,
+          "damaged": false
+        },
+        {
+          "id": "2-6",
+          "type": null,
+          "workers": 0,
+          "damaged": false
+        }
+      ],
+      [
+        {
+          "id": "3-0",
+          "type": null,
+          "workers": 0,
+          "damaged": false
+        },
+        {
+          "id": "3-1",
+          "type": null,
+          "workers": 0,
+          "damaged": false
+        },
+        {
+          "id": "3-2",
+          "type": null,
+          "workers": 0,
+          "damaged": false
+        },
+        {
+          "id": "3-3",
+          "type": null,
+          "workers": 0,
+          "damaged": false
+        },
+        {
+          "id": "3-4",
+          "type": null,
+          "workers": 0,
+          "damaged": false
+        },
+        {
+          "id": "3-5",
+          "type": null,
+          "workers": 0,
+          "damaged": false
+        },
+        {
+          "id": "3-6",
+          "type": null,
+          "workers": 0,
+          "damaged": false
+        }
+      ]
+    ],
+    "colonists": [
+      {
+        "id": "c0",
+        "name": "VASQUEZ",
+        "status": "working",
+        "backstory": "Former Arc logistics worker. Knew their supply routes before defecting. Hasn't stopped being useful since.",
+        "quirk": {
+          "id": "lightSleeper",
+          "label": "Light Sleeper",
+          "icon": "👁",
+          "desc": "Always the first to notice something wrong. Passive +0.1 morale/tick while alive.",
+          "mechanical": "passive +0.1 morale per tick this colonist is alive and not injured"
+        },
+        "injuryCount": 0,
+        "xp": 30,
+        "level": 1,
+        "traits": [
+          "ironLungs"
+        ],
+        "dutyTicks": 306,
+        "ticksAlive": 306,
+        "pendingTraitPick": false,
+        "joinTick": 0,
+        "expeditionsCompleted": 0,
+        "raidsSurvived": 1
+      },
+      {
+        "id": "c1",
+        "name": "CHEN",
+        "status": "working",
+        "backstory": "Lost everyone in the Second Wave. Doesn't talk about before. Works like they're trying not to remember.",
+        "quirk": {
+          "id": "claustrophobic",
+          "label": "Claustrophobic",
+          "icon": "😰",
+          "desc": "Manages. Barely. -0.1 morale/tick from being underground. Goes topside anyway.",
+          "mechanical": "-0.1 morale drain per tick. On strained morale state, 10% chance per tick of panic dilemma event."
+        },
+        "injuryCount": 0,
+        "xp": 30,
+        "level": 1,
+        "traits": [
+          "ironLungs"
+        ],
+        "dutyTicks": 306,
+        "ticksAlive": 306,
+        "pendingTraitPick": false,
+        "joinTick": 0,
+        "expeditionsCompleted": 0,
+        "raidsSurvived": 1
+      },
+      {
+        "id": "c2",
+        "name": "OKAFOR",
+        "status": "working",
+        "backstory": "Field medic before the surface became uninhabitable. Hands still shake in enclosed spaces. Never misses a patient.",
+        "quirk": {
+          "id": "arcSensitive",
+          "label": "Arc-Sensitive",
+          "icon": "🔮",
+          "desc": "Something in them responds to Arc presence. 20% chance to give 1 tick of early raid warning.",
+          "mechanical": "when raid window opens, 20% chance to fire a warning log entry the previous tick"
+        },
+        "injuryCount": 0,
+        "xp": 30,
+        "level": 1,
+        "traits": [
+          "veteran"
+        ],
+        "dutyTicks": 305,
+        "ticksAlive": 306,
+        "pendingTraitPick": false,
+        "joinTick": 0,
+        "expeditionsCompleted": 0,
+        "raidsSurvived": 1
+      },
+      {
+        "id": "c1772308082212-0.9090645765669234",
+        "name": "REYES",
+        "status": "working",
+        "backstory": "Claims to be one of the original founders of this colony. Nobody can confirm it. Nobody argues.",
+        "quirk": {
+          "id": "steadyHands",
+          "label": "Steady Hands",
+          "icon": "🖐",
+          "desc": "Everything lands one step lighter. Kills become injuries. Injuries become close calls.",
+          "mechanical": "raid outcome rolls: kill threshold (>0.80) → injury, injury threshold (0.50-0.80) → flee instead"
+        },
+        "injuryCount": 0,
+        "joinTick": 0,
+        "xp": 30,
+        "level": 1,
+        "traits": [
+          "ghost"
+        ],
+        "dutyTicks": 304,
+        "ticksAlive": 304,
+        "pendingTraitPick": false,
+        "expeditionsCompleted": 0,
+        "raidsSurvived": 1
+      },
+      {
+        "id": "c1772308092460-0.9800292112430902",
+        "name": "TAKEDA",
+        "status": "working",
+        "backstory": "Born underground. Never registered with any settlement. Technically doesn't exist on any record.",
+        "quirk": {
+          "id": "paranoid",
+          "label": "Paranoid",
+          "icon": "🧠",
+          "desc": "Too stubborn to show fear. Never flees raids, regardless of outcome roll.",
+          "mechanical": "flee roll always treated as hold/injury regardless of result"
+        },
+        "injuryCount": 0,
+        "joinTick": 0,
+        "xp": 26,
+        "level": 1,
+        "traits": [
+          "scavenger"
+        ],
+        "dutyTicks": 268,
+        "ticksAlive": 302,
+        "pendingTraitPick": false,
+        "expeditionsCompleted": 0,
+        "raidsSurvived": 1
+      },
+      {
+        "id": "c1772308180420-0.33307847677671987",
+        "name": "SOLÍS",
+        "status": "idle",
+        "backstory": "Ran a surface black market for two years before settling here. Still has contacts nobody knows about.",
+        "quirk": {
+          "id": "packRat",
+          "label": "Pack Rat",
+          "icon": "🎒",
+          "desc": "Always comes back with more than expected. +1 bonus to scrap and salvage expedition rolls.",
+          "mechanical": "scrapGained and salvageGained from expedition results each +1"
+        },
+        "injuryCount": 0,
+        "joinTick": 0,
+        "xp": 23,
+        "level": 1,
+        "traits": [
+          "ironLungs"
+        ],
+        "dutyTicks": 239,
+        "ticksAlive": 249,
+        "pendingTraitPick": false,
+        "expeditionsCompleted": 0,
+        "raidsSurvived": 1
+      },
+      {
+        "id": "c1772308207407-0.05805876091713802",
+        "name": "BOREK",
+        "status": "working",
+        "backstory": "Born underground. Never registered with any settlement. Technically doesn't exist on any record.",
+        "quirk": {
+          "id": "lightSleeper",
+          "label": "Light Sleeper",
+          "icon": "👁",
+          "desc": "Always the first to notice something wrong. Passive +0.1 morale/tick while alive.",
+          "mechanical": "passive +0.1 morale per tick this colonist is alive and not injured"
+        },
+        "injuryCount": 0,
+        "joinTick": 0,
+        "xp": 17,
+        "level": 0,
+        "traits": [],
+        "dutyTicks": 178,
+        "ticksAlive": 205,
+        "pendingTraitPick": false,
+        "expeditionsCompleted": 0,
+        "raidsSurvived": 1
+      },
+      {
+        "id": "c1772308277842-0.6991015123813327",
+        "name": "WADE",
+        "status": "working",
+        "backstory": "Lost a hand topside two years ago. The salvaged prosthetic works. They manage.",
+        "quirk": {
+          "id": "paranoid",
+          "label": "Paranoid",
+          "icon": "🧠",
+          "desc": "Too stubborn to show fear. Never flees raids, regardless of outcome roll.",
+          "mechanical": "flee roll always treated as hold/injury regardless of result"
+        },
+        "injuryCount": 0,
+        "joinTick": 0,
+        "xp": 17,
+        "level": 0,
+        "traits": [],
+        "dutyTicks": 173,
+        "ticksAlive": 174,
+        "pendingTraitPick": false,
+        "expeditionsCompleted": 0,
+        "raidsSurvived": 1
+      },
+      {
+        "id": "c1772308278266-0.18704449739054696",
+        "name": "KIRA",
+        "status": "working",
+        "backstory": "Former raider who changed sides after the machines took their crew. Carries it quietly.",
+        "quirk": {
+          "id": "claustrophobic",
+          "label": "Claustrophobic",
+          "icon": "😰",
+          "desc": "Manages. Barely. -0.1 morale/tick from being underground. Goes topside anyway.",
+          "mechanical": "-0.1 morale drain per tick. On strained morale state, 10% chance per tick of panic dilemma event."
+        },
+        "injuryCount": 0,
+        "joinTick": 0,
+        "xp": 17,
+        "level": 0,
+        "traits": [],
+        "dutyTicks": 173,
+        "ticksAlive": 174,
+        "pendingTraitPick": false,
+        "expeditionsCompleted": 0,
+        "raidsSurvived": 1
+      },
+      {
+        "id": "c1772308307852-0.5770887272778672",
+        "name": "DANSEN",
+        "status": "working",
+        "backstory": "Mechanic. Fixates obsessively on machines when stressed. The colony runs better for it.",
+        "quirk": {
+          "id": "lightSleeper",
+          "label": "Light Sleeper",
+          "icon": "👁",
+          "desc": "Always the first to notice something wrong. Passive +0.1 morale/tick while alive.",
+          "mechanical": "passive +0.1 morale per tick this colonist is alive and not injured"
+        },
+        "injuryCount": 0,
+        "joinTick": 0,
+        "xp": 13,
+        "level": 0,
+        "traits": [],
+        "dutyTicks": 133,
+        "ticksAlive": 136,
+        "pendingTraitPick": false,
+        "expeditionsCompleted": 0,
+        "raidsSurvived": 1
+      },
+      {
+        "id": "c1772308318489-0.7587407383791436",
+        "name": "PATCH",
+        "status": "idle",
+        "backstory": "Lost everyone in the Second Wave. Doesn't talk about before. Works like they're trying not to remember.",
+        "quirk": {
+          "id": "tunnelBlind",
+          "label": "Tunnel-Blind",
+          "icon": "🕶",
+          "desc": "Useless in full daylight. Cannot be assigned to expeditions. Exceptional underground.",
+          "mechanical": "filtered from expedition candidate list entirely"
+        },
+        "injuryCount": 0,
+        "joinTick": 0,
+        "xp": 0,
+        "level": 0,
+        "traits": [],
+        "dutyTicks": 0,
+        "ticksAlive": 112,
+        "pendingTraitPick": false,
+        "expeditionsCompleted": 0,
+        "raidsSurvived": 1
+      },
+      {
+        "id": "c1772308449378-0.6905811073920177",
+        "name": "ECHO",
+        "status": "working",
+        "backstory": "Found wandering the outer tunnels with no memory of before. Doesn't seem troubled by it.",
+        "quirk": {
+          "id": "steadyHands",
+          "label": "Steady Hands",
+          "icon": "🖐",
+          "desc": "Everything lands one step lighter. Kills become injuries. Injuries become close calls.",
+          "mechanical": "raid outcome rolls: kill threshold (>0.80) → injury, injury threshold (0.50-0.80) → flee instead"
+        },
+        "injuryCount": 0,
+        "joinTick": 0,
+        "xp": 5,
+        "level": 0,
+        "traits": [],
+        "dutyTicks": 58,
+        "ticksAlive": 70,
+        "pendingTraitPick": false,
+        "expeditionsCompleted": 0,
+        "raidsSurvived": 0
+      },
+      {
+        "id": "c1772308487698-0.6920468892751359",
+        "name": "SLATE",
+        "status": "idle",
+        "backstory": "Ran a surface black market for two years before settling here. Still has contacts nobody knows about.",
+        "quirk": {
+          "id": "paranoid",
+          "label": "Paranoid",
+          "icon": "🧠",
+          "desc": "Too stubborn to show fear. Never flees raids, regardless of outcome roll.",
+          "mechanical": "flee roll always treated as hold/injury regardless of result"
+        },
+        "injuryCount": 0,
+        "joinTick": 0,
+        "xp": 0,
+        "level": 0,
+        "traits": [],
+        "dutyTicks": 0,
+        "ticksAlive": 6,
+        "pendingTraitPick": false,
+        "expeditionsCompleted": 0,
+        "raidsSurvived": 0
+      }
+    ],
+    "activeRaid": {
+      "sizeKey": "medium",
+      "ticksLeft": 14,
+      "strikeCountdown": 4
+    },
+    "raidWindow": null,
+    "surfaceDefenseActive": true,
+    "unlockedRows": [
+      0,
+      1,
+      2
+    ],
+    "excavations": {},
+    "expeditions": [],
+    "unlockedTechs": [],
+    "surfaceHaul": {
+      "salvage": 0,
+      "arcTech": 2,
+      "schematics": []
+    },
+    "memorial": [
+      {
+        "id": "c1772308313867-0.676724009942785",
+        "name": "VOLT",
+        "level": 0,
+        "traits": [],
+        "cause": "raidKilled",
+        "day": 7,
+        "hour": "05:30",
+        "epitaph": "Didn't run. That wasn't in them."
+      },
+      {
+        "id": "c1772308180420-0.33307847677671987",
+        "name": "SOLÍS",
+        "level": 1,
+        "traits": [
+          "ironLungs"
+        ],
+        "cause": "raidFled",
+        "day": 7,
+        "hour": "05:30",
+        "epitaph": "Decided the odds weren't worth it."
+      },
+      {
+        "id": "c1772308099256-0.8922575790159827",
+        "name": "MORROW",
+        "level": 0,
+        "traits": [],
+        "cause": "moraleDeath",
+        "day": 3,
+        "hour": "02:00",
+        "epitaph": "Walked into the tunnels. Didn't say goodbye."
+      },
+      {
+        "id": "c1",
+        "name": "CHEN",
+        "level": 0,
+        "traits": [],
+        "cause": "moraleDeath",
+        "day": 3,
+        "hour": "02:00",
+        "epitaph": "The colony couldn't hold them here anymore."
+      }
+    ],
+    "timescale": 0
+  }
+}

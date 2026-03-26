@@ -1,128 +1,152 @@
 # Raid System Overhaul — Master Plan
 
+## Purpose
+
+This folder is a staged implementation plan for improving raids in Speranza.
+
+These docs are design plus implementation guidance, not a literal transcript of the live code. They must follow current project rules:
+
+- Read the target file before editing it
+- Prefer surgical edits over rewrites
+- Keep `gameData.js` pure
+- Keep `Speranza.jsx` as the game brain
+- Keep `src/components/` props-only
+- Keep `src/surface_defense.jsx` self-contained for minigame internals
+- Never rely on stale line numbers without re-reading the file first
+
+If any step conflicts with the real codebase, the codebase and `.clinerules/` files win.
+
+---
+
 ## Design Intent
 
-Every raid begins as a surface defense mini-game. The old tick-based underground strike system only fires if the player's surface defenses are breached (hatch HP reaches 0). Winning on the surface means the colony takes zero hits. Losing means Arc forces are underground and the colony suffers the consequences.
+Every raid should begin as the surface-defense minigame. The older underground strike system should only matter if the surface layer fails and the hatch is breached.
 
-The mini-game should feel tense, skill-expressive, and directly connected to the colony you've built. Your Sentry Post workers show up as defenders. Your colony's wealth determines how hard the Arc hits you.
+The system should feel:
+
+- tense and skill-expressive in the minigame
+- meaningfully connected to the colony the player built
+- scalable as the colony grows stronger
+
+---
+
+## Implementation Discipline For Every Step
+
+Before touching code for any step in this folder:
+
+1. Read the target files again
+2. Verify the exact insertion point in the live file
+3. Match existing patterns in that file
+4. If the tick loop reads a new piece of state, add a ref mirror
+5. Preserve known safeguards, especially delta-based `onScrapChange`
+6. Do not move logic into UI components just because a doc says “render” something
+
+Use these ownership rules:
+
+- **`src/gameData.js`** → constants, pure helpers, named exports only
+- **`src/Speranza.jsx`** → state, refs, tick-loop integration, handlers, derived values passed downward
+- **`src/surface_defense.jsx`** → minigame-only entities, wave generation, projectiles, rendering, local lifecycle
+- **`src/components/`** → props-only UI, no game logic
 
 ---
 
 ## Steps — In Order
 
-| Step | Name | File | Status |
-|------|------|------|--------|
-| 1 | Bug Fixes & Debug Cleanup | STEP_1_bug_fixes.md | TODO |
-| 2 | Flying Arc Units | STEP_2_flying_units.md | TODO |
-| 3 | Sentry Post → Bunker Integration | STEP_3_sentry_bunker.md | TODO |
-| 4 | Wealth-Scaling Raids | STEP_4_wealth_scaling.md | TODO |
-| 5 | New Defenses (Armory L2 Gated) | STEP_5_new_defenses.md | TODO |
+| Step | Name | Primary Files | Goal |
+|------|------|---------------|------|
+| 1 | Bug Fixes & Debug Cleanup | `src/Speranza.jsx`, `src/surface_defense.jsx` | Stabilize the current raid flow before adding features |
+| 2 | Flying Arc Units | `src/surface_defense.jsx` | Add air threats that bypass barricades |
+| 3 | Sentry Post → Bunker Integration | `src/Speranza.jsx`, `src/surface_defense.jsx` | Make colony sentry staffing show up in the minigame |
+| 4 | Wealth-Scaling Raids | `src/gameData.js`, `src/Speranza.jsx`, `src/surface_defense.jsx` | Make raid severity reflect colony success |
+| 5 | New Defenses (Armory-Locked) | `src/Speranza.jsx`, `src/surface_defense.jsx` | Add dedicated anti-air and crowd-control tools |
 
 ---
 
 ## Step Summaries
 
 ### Step 1 — Bug Fixes & Debug Cleanup
-Two problems to fix before any new features land:
-1. The underground strike system runs during the mini-game. It should be completely suppressed while surface defense is active — strikes only resume if the hatch is breached.
-2. The surface_defense.jsx has a visible raid-size selector (SMALL / MEDIUM / LARGE buttons) that lets the player pick their raid difficulty. This is dev tooling that was never removed.
+
+Do the cleanup work first.
+
+Main goals:
+
+1. Ensure underground strike damage does not resolve while `surfaceDefenseActive` is running
+2. Remove any remaining dev-only raid controls from the minigame UI
+3. Remove dev-only restart behavior that can desync colony state and minigame state
+4. Fix known raid-lifecycle bugs before layering on more mechanics
 
 ### Step 2 — Flying Arc Units
-Two new enemy types that fly above ground level, bypassing all barricades and forcing the player to think about defense placement differently.
 
-**Light Flier — Arc Drone**
-- Fast, low HP, mid-altitude (~y 60)
-- Sinusoidal weave path — harder for turrets to lead
-- Fires a burst of 3 small machine-gun rounds at the hatch, then loops back, then re-approaches
-- Not blocked by barricades at all — flies over them
-- Turrets can target it normally. Barricades are useless against it.
+Add two flying enemies inside `src/surface_defense.jsx`:
 
-**Heavy Flier — Arc Gunship**
-- Slow, high HP, high altitude (~y 30)
-- Fires one large slow rocket per pass that deals splash damage — can destroy multiple defenses at once
-- Does NOT attack the hatch directly — it suppresses defenses so ground units can push through
-- Countered by: Missile Launchers (prioritize air targets). Turrets deal 50% damage to it.
-- The terror unit. Demands a specific defensive response.
-
-Wave generator changes: fliers appear from wave 3 onwards in medium raids, wave 2 in large raids.
+- **Arc Drone**: fast, light air attacker with repeated hatch attack runs
+- **Arc Gunship**: slow heavy air unit that suppresses defenses with splash rockets
 
 ### Step 3 — Sentry Post → Bunker Integration
-Sentry Post colonists assigned in the colony automatically appear as defenders in the surface mini-game.
 
-- Speranza.jsx passes `sentryWorkers` count as prop to SurfaceDefense
-- SurfaceDefense renders a Bunker structure in center-left of the surface
-- Each sentry worker = 1 gun slot in the bunker
-- Bunker auto-fires at nearest enemy: low damage (4 per shot), fast fire rate (every 20 ticks)
-- Bunker has its own HP pool (60 HP per worker slot, shared)
-- If Bunker HP reaches 0: all bunker-assigned colonists become `injured` back in the colony (real consequence — passed via callback)
-- Bunker workers do NOT count as idle colonists during the raid
+Connect colony staffing to the minigame.
+
+High-level flow:
+
+- `Speranza.jsx` derives the number of active sentry workers from live colony state
+- `Speranza.jsx` passes that value into `SurfaceDefense`
+- `surface_defense.jsx` creates and manages the bunker using that prop
+- if bunker destruction has colony consequences, `surface_defense.jsx` reports the event upward via callback and `Speranza.jsx` applies the colony-side state changes
 
 ### Step 4 — Wealth-Scaling Raids
-Colony wealth (not a fixed formula) determines starting raid size and wave intensity. Rich, expanded colonies draw harder raids.
 
-**Wealth formula:**
-```
-wealth = (res.scrap + res.energy + res.food + res.water) + (builtRooms * 40) + (colonists.length * 15)
-```
+Separate raid frequency from raid severity:
 
-**Raid scaling:**
-- Wealth < 300: always starts Small
-- Wealth 300–600: starts Small, 30% chance Medium
-- Wealth 600–1000: starts Medium, 20% chance Large
-- Wealth > 1000: starts Large, 20% chance Boss (once Boss tier exists)
+- heat still determines when raids happen
+- wealth determines how dangerous they are
 
-Additionally: total wave count within a size scales with wealth. A "small" raid against a wealthy colony sends more enemies per wave than a small raid against a struggling colony. Wave count = base ± 1 based on wealth bracket.
+Ownership:
 
-This replaces the current "heat state → size index" mapping at tick loop line 961–964. Heat state still controls raid frequency. Wealth controls raid severity.
+- wealth-calculation helpers belong in `gameData.js` if they can stay pure
+- raid-trigger integration belongs in `Speranza.jsx`
+- wave-density tuning inside the minigame belongs in `surface_defense.jsx`
 
-### Step 5 — New Defenses (Armory L2 Gated)
-Two new placeable defenses unlocked when the colony has a Level 2 Armory.
+### Step 5 — New Defenses (Armory-Locked)
 
-**Flak Battery** (cost: 55 scrap)
-- Short range (100), burst fire (fires every 20 ticks, 3 projectiles per burst)
-- Targets flying enemies with priority — ground enemy damage halved
-- Splash radius: projectiles deal 50% damage to nearby enemies on hit
-- The dedicated anti-air answer. Pairs with turrets for full coverage.
+Add two new placeable defenses:
 
-**EMP Cannon** (cost: 65 scrap)
-- Long range (200), very slow fire rate (every 120 ticks)
-- On hit: stuns all enemies in a 60px radius for 3 seconds (180 ticks)
-- Deals no HP damage — pure crowd control
-- The "oh shit" button. One well-placed EMP can save a wave when everything is breaking.
+- **Flak Battery** → dedicated anti-air response
+- **EMP Cannon** → crowd-control / stun tool
 
-**Gating mechanism:** SurfaceDefense receives `armoryLevel` prop from Speranza.jsx. In the defense picker UI, Flak Battery and EMP Cannon show as locked (grayed, lock icon, "ARMORY LVL 2") when `armoryLevel < 2`. Note: this requires the Armory upgrade system to exist. If it doesn't yet, these defenses remain hidden entirely until that system lands.
+Defense behavior and rendering live in `surface_defense.jsx`. Armory-derived unlock state is calculated in `Speranza.jsx` and passed down as a prop.
 
 ---
 
-## Architecture Notes
+## Cross-Step Safety Rules
 
-### Prop Interface — SurfaceDefense Component
-After this update, the SurfaceDefense component accepts:
-```js
-SurfaceDefense({
-  active,           // bool — whether raid is currently happening
-  scrap,            // number — colony scrap passed in
-  onScrapChange,    // (delta) => void — reports scrap spent/earned back to colony
-  raidSize,         // "small" | "medium" | "large" — set by the raid system
-  wealthBracket,    // 0|1|2|3 — controls wave intensity within size (Step 4)
-  sentryWorkers,    // number — colonists in Sentry Post (Step 3)
-  armoryLevel,      // number — unlocks new defenses (Step 5)
-  onRaidWon,        // () => void — surface fully defended
-  onRaidLost,       // () => void — hatch breached, old system takes over
-  onBunkerDestroyed,// () => void — sentry workers injured (Step 3)
-})
-```
+Across all five steps:
 
-### Speranza.jsx Touch Points
-- Step 1: Add `surfaceDefenseRef`, guard strike block at ~line 1005
-- Step 3: Add `sentryWorkers` calculation, pass to SurfaceDefense, add `onBunkerDestroyed` handler
-- Step 4: Add wealth calculation, replace sizeIdx logic at ~line 961
-- Step 5: Pass `armoryLevel` prop (reads from grid state)
+- Keep `onScrapChange` delta-based
+- If the main tick loop reads a new value, mirror it through a ref
+- Avoid broad refactors of `Speranza.jsx`
+- Do not move colony logic into `surface_defense.jsx`
+- Do not move minigame internals into UI components
+- Re-check imports after any edit to `Speranza.jsx`
+- When line numbers drift, use section/function names instead
 
 ---
 
-## What This Does NOT Change
-- The scrap pool remains shared — colony scrap is mini-game scrap
-- The raid trigger system (heat → raid window → raid launch) is unchanged
-- `handleSurfaceRaidWon` and `handleSurfaceRaidLost` callbacks remain the handoff points
-- The old underground strike tick loop remains intact — it just only runs post-breach
+## Suggested Execution Order
+
+Implement in this order only:
+
+1. Step 1
+2. Step 2
+3. Step 3
+4. Step 4
+5. Step 5
+
+---
+
+## What This Plan Does Not Change
+
+- the shared scrap economy between colony and minigame
+- the basic heat → raid window → raid launch pipeline
+- the role of `handleSurfaceRaidWon` / `handleSurfaceRaidLost` as primary handoff points
+
+If implementation reveals hidden lifecycle issues, fix those surgically before proceeding to the next step.

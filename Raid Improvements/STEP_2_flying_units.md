@@ -1,252 +1,159 @@
 # Step 2 — Flying Arc Units
 
+## Purpose
+
+Add air threats to the surface-defense minigame so barricades are no longer a universal answer.
+
+This step should stay mostly inside `src/surface_defense.jsx`. Only move data into `src/gameData.js` if doing so remains purely declarative and reusable.
+
+---
+
 ## Files Touched
-- `src/surface_defense.jsx` only
+
+- `src/surface_defense.jsx`
+- optionally `src/gameData.js` for pure enemy constants/helpers only if that clearly improves reuse
 
 ---
 
-## Overview
+## Ownership
 
-Two new enemy types that fly above the ground plane, bypassing all barricades. They force the player to reconsider turret placement and create demand for the Flak Battery (Step 5). Both are introduced gradually — light fliers appear in medium raids from wave 3+, large raids from wave 2+. Heavy fliers only appear in large raids.
-
----
-
-## Data — New Enemy Types
-
-Add to `ENEMY_TYPES` object:
-
-```js
-drone: {
-  hp: 25, maxHp: 25,
-  speed: 0.9,           // fast
-  damage: 6,            // per machine-gun round (fires 3 in a burst)
-  burstCount: 3,        // rounds per attack pass
-  burstInterval: 8,     // ticks between rounds in a burst
-  reward: 12,
-  w: 10,
-  color: "#ff6600",
-  altitude: 55,         // y position (above GROUND_Y = 130, so this is sky level)
-  flying: true,
-  attackStyle: "machinegun",
-},
-gunship: {
-  hp: 180, maxHp: 180,
-  speed: 0.22,          // slow and deliberate
-  damage: 45,           // rocket damage (splash)
-  splashRadius: 55,     // px — damages defenses in radius on hit
-  reward: 40,
-  w: 28,
-  color: "#cc2200",
-  altitude: 28,         // higher altitude
-  flying: true,
-  attackStyle: "rocket",
-  rocketSpeed: 2.5,     // slower projectile
-},
-```
+- `surface_defense.jsx` owns flying-enemy behavior, movement, targeting, rendering, projectile behavior, and wave generation
+- `gameData.js` may own static enemy config if exported as named pure data
+- `Speranza.jsx` should not absorb minigame-only enemy logic for this step
 
 ---
 
-## Enemy Object Shape — Extended Fields
+## Read First
 
-`makeEnemy` needs new fields for flying units:
+Before editing:
 
-```js
-function makeEnemy(side, type = "grunt") {
-  const def = ENEMY_TYPES[type];
-  const flying = def.flying ?? false;
-  return {
-    id: eid++, type,
-    x: side === "left" ? -30 : W + 30,
-    y: flying ? def.altitude : GROUND_Y,     // altitude for fliers, ground for walkers
-    dir: side === "left" ? 1 : -1,
-    hp: def.hp, maxHp: def.maxHp,
-    speed: def.speed, damage: def.damage, reward: def.reward, w: def.w,
-    color: def.color,
-    flying,
-    altitude: def.altitude ?? GROUND_Y,
-    attackStyle: def.attackStyle ?? "melee",
-    attackCooldown: 0,
-    hatchCooldown: 0,
-    // Drone-specific
-    burstCount: def.burstCount ?? 0,
-    burstInterval: def.burstInterval ?? 0,
-    burstRemaining: 0,
-    burstTimer: 0,
-    attackPhase: "approach",  // "approach" | "burst" | "retreat" | "loop"
-    loopTimer: 0,
-    // Gunship-specific
-    splashRadius: def.splashRadius ?? 0,
-    rocketSpeed: def.rocketSpeed ?? 5,
-    dead: false,
-  };
-}
-```
+1. re-read enemy definitions in `src/surface_defense.jsx`
+2. re-read enemy movement/update logic
+3. re-read projectile creation and hit resolution
+4. re-read wave generation / wave start logic
+5. re-read the render order so air units layer correctly
+
+Do not trust old line numbers from earlier notes.
 
 ---
 
-## Movement & Behavior Logic
+## Feature Summary
 
-### Drone (Arc Drone) — machine-gun attacker
+Add two new enemy types:
 
-Movement follows an attack-run pattern with three phases:
+### Arc Drone
 
-**Phase: "approach"**
-- Moves toward the hatch at full speed
-- When within 80px of hatch: switch to "burst"
+- fast
+- low HP
+- flies above the ground plane
+- performs repeated attack runs on the hatch
+- ignores barricades completely
 
-**Phase: "burst"**
-- Stops horizontal movement (hovers)
-- Fires one projectile per `burstInterval` ticks, up to `burstCount` times
-- `burstRemaining` tracks shots left
-- Each shot: `makeProjectile(en.x, en.y, HATCH_X, GROUND_Y - 3, en.damage, en.color)`
-- When `burstRemaining <= 0`: switch to "retreat"
+### Arc Gunship
 
-**Phase: "retreat"**
-- Moves away from hatch at 1.2× normal speed (banking away)
-- When off-screen (x < -40 or x > W+40): switch to "loop"
-
-**Phase: "loop"**
-- `loopTimer` counts down from 90 ticks
-- When done: respawn from original side, switch to "approach"
-- (Re-enter from same side — the drone is circling back for another pass)
-
-**Key properties:**
-- Flying = true → barricade collision check is skipped entirely
-- Barricade blocking logic currently checks `d.type === "barricade" && Math.abs(d.x - en.x) < 20` — wrap this check with `if (!en.flying)`
-- Turrets can target drones normally (range check is just distance-based, altitude doesn't matter yet — add Flak priority in Step 5)
-
-### Gunship (Arc Gunship) — rocket suppressor
-
-Movement:
-- Slow, steady flight path across the top of the screen (altitude 28)
-- Does NOT target the hatch — targets defenses
-- Flies from entry edge toward center, stops at x = W * 0.3 or W * 0.7 (depending on side), holds position for attack
-
-Attack cycle:
-- When in position (reached stop x), `attackCooldown` counts down from 150 ticks
-- When ready: find the defense with lowest HP in range (200px) — if none, pick nearest defense
-- Fire a rocket: `makeRocket(en.x, en.y, target.x, target.y - target.height/2, en.damage, en.color, en.splashRadius, en.rocketSpeed)`
-- After firing: resume movement to exit the other side
-- If no defenses remain: flies to hatch and attacks it directly (fallback)
-
-**Turret damage penalty:** When a turret fires at a flying enemy, damage = `def.damage * (en.flying ? 0.5 : 1.0)`. Turrets aren't optimized for air targets.
+- slow
+- high HP
+- flies higher than the drone
+- targets defenses with splash rockets
+- should feel like a specialized suppression threat rather than a basic damage sponge
 
 ---
 
-## Projectile Extension — Rockets
+## Data Guidance
 
-Rockets are a new projectile subtype with splash on hit. Either extend `makeProjectile` or add `makeRocket`:
+Whether enemy definitions live inline in `surface_defense.jsx` or move to `gameData.js`, keep the structure purely declarative.
 
-```js
-function makeRocket(sx, sy, tx, ty, damage, color, splashRadius, speed) {
-  const dx = tx - sx, dy = ty - sy;
-  const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-  return {
-    id: pid++, x: sx, y: sy,
-    vx: (dx / dist) * speed,
-    vy: (dy / dist) * speed,
-    damage, color,
-    splash: true,
-    splashRadius,
-    dead: false,
-  };
-}
-```
-
-**Splash hit logic** — in the projectile-hit section of the game loop, check `p.splash`:
-```js
-if (p.splash) {
-  // Apply damage to all defenses within splashRadius
-  s.defenses.forEach(d => {
-    if (!d.dead && Math.sqrt((d.x - p.x)**2 + (d.y - p.y)**2) < p.splashRadius) {
-      d.hp -= p.damage;
-      if (d.hp <= 0) d.dead = true;
-    }
-  });
-  p.dead = true;
-} else {
-  // existing single-target hit logic
-}
-```
+If the minigame already uses a single local `ENEMY_TYPES` table, extending that local table is acceptable and likely safer.
 
 ---
 
-## Wave Generator Changes
+## Behavior Guidance
 
-Update `generateWave(waveIdx)` to add fliers. Fliers come from above, not a side — pass `side: "air"` as a convention, then `makeEnemy` handles altitude automatically.
+### Drone
 
-```js
-// In generateWave, add after existing group definitions:
-if (totalWaves >= 5 && w >= 2) {
-  // Medium+ raids: drones from wave 2
-  const droneCount = 1 + Math.floor((w - 1) * 0.5);
-  groups.push({ type: "drone", side: w % 2 === 0 ? "right" : "left", count: droneCount, interval: Math.max(30, 50 - w * 3) });
-}
-if (totalWaves >= 8 && w >= 3) {
-  // Large raids only: gunships from wave 3
-  if (w % 3 === 0) {  // gunships every 3rd wave
-    groups.push({ type: "gunship", side: w % 2 === 0 ? "left" : "right", count: 1, interval: 180 });
-  }
-}
-```
+Recommended behavior phases:
 
-The `totalWaves` is already on `stateRef.current.totalWaves` — pass it into `generateWave` as a second argument: `generateWave(idx, s.totalWaves)`.
+- approach
+- burst / hover attack
+- retreat
+- loop / re-entry delay
 
----
+Implementation constraints:
 
-## Rendering — Fliers
+- drone movement must bypass ground-only barricade blocking
+- turret targeting may still use normal distance checks unless a later step adds explicit anti-air prioritization
+- if a new state field is required on the enemy object, keep it local to minigame entity state
 
-Flying enemies render at their `y = en.altitude` (not GROUND_Y). Add to the enemy render section, after the existing ground-enemy draw code:
+### Gunship
 
-### Drone render
-```
-Small angular diamond (rotated square):
-- Body: 4-point polygon, ~10px, orange fill
-- Pulsing glow: semi-transparent circle, radius 8, oscillates with s.tick
-- Two thin wing lines extending from body horizontally
-- LED: 2px circle at nose, bright red
-- Trail: dashed line behind (sin-wave path visual from previous 3 positions)
-```
+Recommended behavior:
 
-Implementation: use `ctx.save()` / `ctx.restore()` with rotation. Diamond is a `ctx.beginPath()` with 4 `lineTo` calls.
+- enters at high altitude
+- moves to an attack position
+- targets defenses first
+- fires slower splash rockets
+- exits or continues its path after firing
 
-### Gunship render
-```
-Wide angular body (elongated hexagon):
-- Width: 28px, height: 14px
-- Two swept wings extending to 50px total span
-- Engine glow: two orange circles at rear (left and right)
-- Nose cone: forward-pointing triangle
-- Color: dark red (#cc2200) body, orange engines
-```
+Implementation constraints:
 
-Both fliers render **before** ground units in the draw order so ground units appear "in front" (more depth-correct).
+- if turret damage vs air is tuned separately, keep that tuning local and explicit
+- do not entangle gunship suppression logic with colony-side state in `Speranza.jsx`
 
 ---
 
-## Existing Code Touch Points
+## Projectile Guidance
 
-| Location | Change |
-|---|---|
-| `ENEMY_TYPES` object | Add `drone` and `gunship` entries |
-| `makeEnemy()` | Add flying fields to returned object |
-| Enemy movement block | Wrap barricade check with `if (!en.flying)`; add drone phase logic; add gunship movement |
-| Projectile hit block | Add `p.splash` branch with radius damage |
-| `generateWave()` | Accept `totalWaves` arg; add drone/gunship groups |
-| `startWave()` call | Pass `s.totalWaves`: `generateWave(idx, s.totalWaves)` |
-| Enemy render section | Add drone + gunship draw code; render before ground enemies |
-| Turret fire logic | Apply `en.flying ? 0.5 : 1.0` damage multiplier |
+If rockets or other special projectile types are added:
+
+- keep projectile constructors/minigame projectile state inside `surface_defense.jsx`
+- clearly distinguish normal, splash, and any future special projectile flags
+- keep hit resolution readable and branch by projectile capability rather than by scattered ad hoc checks
+
+---
+
+## Wave Generation Guidance
+
+Flying units should be introduced gradually.
+
+Recommended approach:
+
+- drones appear earlier than gunships
+- medium raids get drones before large raids get gunships
+- gunships should remain comparatively rare
+
+---
+
+## Rendering Guidance
+
+Air units should read visually as airborne even in the simple canvas style.
+
+Rendering rules:
+
+- render flying units at their own `y`/altitude, not ground level
+- keep silhouettes distinct from ground enemies
+- preserve readable draw order
+- any glow, trails, or pulse effects should remain lightweight and local to canvas rendering
+
+Do not move canvas drawing into a React UI component.
+
+---
+
+## What Not To Do
+
+- do not let drones collide with barricades like ground units
+- do not move minigame wave logic into `Speranza.jsx`
+- do not introduce React state for per-enemy simulation if the file already uses refs/local mutable state for the game loop
+- do not rewrite the entire enemy system if a targeted extension works
 
 ---
 
 ## Verification Checklist
 
-- [ ] Drones appear in medium raids from wave 3, large raids from wave 2
-- [ ] Drones fly at altitude 55, phasing approach → burst → retreat → loop
-- [ ] Drones pass over barricades with no collision
-- [ ] Turrets fire at drones (at reduced effectiveness until Flak added)
-- [ ] Gunships appear in large raids only, fire rockets that splash multiple defenses
-- [ ] Rockets render as larger, slower projectiles with distinct color trail
-- [ ] Splash damage hits multiple defenses in radius
-- [ ] No z-fighting: fliers visually appear above ground (render first in draw order)
-- [ ] Killing a drone/gunship grants correct scrap reward
+- [ ] Drones appear only in the intended raid tiers / wave ranges
+- [ ] Gunships appear only in the intended higher-difficulty cases
+- [ ] Flying enemies bypass barricades
+- [ ] Existing defenses can still target air when appropriate
+- [ ] Any anti-air damage penalty/bonus behaves as designed
+- [ ] Splash rockets damage the intended targets in radius
+- [ ] Flying enemies render at visible altitude and do not visually read as ground units
+- [ ] Scrap rewards still resolve correctly through delta-based colony scrap updates
