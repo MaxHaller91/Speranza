@@ -1509,23 +1509,11 @@ export default function Speranza() {
           moraleTickBreakdown.net += delta;
         });
 
-        const noResourceNotes = ["energy", "food", "water"].reduce((acc, key) => {
-          const b = resourceBreakdownSnapshot[key];
-          acc[key] = (b.plus.length === 0 && b.minus.length === 0)
-            ? { ...b, plus: ["No major modifiers this tick"] }
-            : b;
-          return acc;
-        }, {});
-
-        const finalMorale = (moraleTickBreakdown.plus.length === 0 && moraleTickBreakdown.minus.length === 0)
-          ? { ...moraleTickBreakdown, plus: ["No major modifiers this tick"] }
-          : moraleTickBreakdown;
-
         setStatBreakdown({
-          energy: noResourceNotes.energy,
-          food: noResourceNotes.food,
-          water: noResourceNotes.water,
-          morale: finalMorale,
+          energy: resourceBreakdownSnapshot.energy,
+          food: resourceBreakdownSnapshot.food,
+          water: resourceBreakdownSnapshot.water,
+          morale: moraleTickBreakdown,
         });
       }
 

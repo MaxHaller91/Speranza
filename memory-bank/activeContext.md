@@ -98,3 +98,10 @@ When resuming work:
 - Production build passed after Steps 1–4 code changes.
 - New planning follow-up added: **Step 4B — Raid Cadence, Pause, and Prep Flow Polish**.
 - That step captures the newly reported issues around immediate raids, back-to-back raids, pause-on-start, Start Raid wording, 10-second inter-wave countdowns, and scrap UI sync.
+
+## Flow Tooltip Accuracy Pass — 2026-03-26
+- Updated the bottom `FlowPanel` hover tooltip so it no longer talks about nonexistent "modifiers."
+- `Speranza.jsx` now passes through the real per-tick supply/demand source breakdowns for energy, food, water, and morale without injecting fake fallback lines into state.
+- `FlowPanel.jsx` now labels the hover sections as **Supply** and **Demand** and uses neutral empty-state copy (`No supply this tick` / `No demand this tick`) only at render time.
+- The tooltip footer continues to read from the same `net` breakdown value used to explain the hover lines, keeping the displayed per-tick amount internally consistent.
+- `npm run build` passed after this change.

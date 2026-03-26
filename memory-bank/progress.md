@@ -172,3 +172,9 @@ The new-defense step in `Raid Improvements/STEP_5_new_defenses.md` is intentiona
 - [ ] Sprites for all room types
 - [ ] Worker animations (CSS animation on the worker dots when active)
 - [ ] More surface condition visual indicators
+
+### Session Update — Flow Tooltip Accuracy Pass
+- [x] Removed fake `"No major modifiers this tick"` fallback injection from flow breakdown state in `src/Speranza.jsx`
+- [x] Flow tooltip now shows real per-tick **Supply** and **Demand** sources instead of "modifiers"
+- [x] Flow tooltip empty states are now render-only and neutral (`No supply this tick` / `No demand this tick`)
+- [x] `npm run build` passed after the tooltip/breakdown update

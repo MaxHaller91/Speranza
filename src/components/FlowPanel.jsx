@@ -2,6 +2,15 @@
 // Props: netFlow, statBreakdown, mousePos, hoveredFlowStat, onHoverFlowStat
 
 export default function FlowPanel({ netFlow, statBreakdown, mousePos, hoveredFlowStat, onHoverFlowStat }) {
+  const renderBreakdownLines = (lines, emptyLabel, color) => {
+    if (!lines.length) {
+      return <div style={{ color, opacity: 0.7, fontSize: 8, lineHeight: 1.4 }}>• {emptyLabel}</div>;
+    }
+    return lines.slice(0, 5).map((line, i) => (
+      <div key={`${emptyLabel}-${i}`} style={{ color, fontSize: 8, lineHeight: 1.4 }}>• {line}</div>
+    ));
+  };
+
   return (
     <div style={{ marginTop: 8, background: "#060810", border: "1px solid #1a2030", borderRadius: 6, padding: "10px 12px" }}>
       <div style={{ color: "#2a4a6a", fontSize: 9, letterSpacing: 2, marginBottom: 8 }}>SUPPLY / DEMAND — NET FLOW PER TICK</div>
@@ -47,6 +56,7 @@ export default function FlowPanel({ netFlow, statBreakdown, mousePos, hoveredFlo
       {/* Hover breakdown tooltip */}
       {hoveredFlowStat && statBreakdown[hoveredFlowStat] && (() => {
         const data = statBreakdown[hoveredFlowStat];
+        const tooltipNet = data.net ?? 0;
         return (
           <div style={{
             position: "fixed", left: mousePos.x + 14, top: mousePos.y + 10,
@@ -54,17 +64,13 @@ export default function FlowPanel({ netFlow, statBreakdown, mousePos, hoveredFlo
             padding: "8px 10px", zIndex: 9999, minWidth: 170, maxWidth: 260,
             pointerEvents: "none", boxShadow: "0 0 14px #00000099",
           }}>
-            <div style={{ color: "#9ab", fontSize: 8, letterSpacing: 1, marginBottom: 4 }}>{hoveredFlowStat.toUpperCase()} MODIFIERS</div>
-            <div style={{ color: "#7ed321", fontSize: 8, marginBottom: 2 }}>+ Reasons</div>
-            {(data.plus.length ? data.plus : ["No major modifiers this tick"]).slice(0, 5).map((line, i) => (
-              <div key={`p-${i}`} style={{ color: "#6fa86f", fontSize: 8, lineHeight: 1.4 }}>• {line}</div>
-            ))}
-            <div style={{ color: "#ff7777", fontSize: 8, margin: "5px 0 2px" }}>– Reasons</div>
-            {(data.minus.length ? data.minus : ["No major modifiers this tick"]).slice(0, 5).map((line, i) => (
-              <div key={`m-${i}`} style={{ color: "#b67878", fontSize: 8, lineHeight: 1.4 }}>• {line}</div>
-            ))}
+            <div style={{ color: "#9ab", fontSize: 8, letterSpacing: 1, marginBottom: 4 }}>{hoveredFlowStat.toUpperCase()} PER-TICK BREAKDOWN</div>
+            <div style={{ color: "#7ed321", fontSize: 8, marginBottom: 2 }}>Supply</div>
+            {renderBreakdownLines(data.plus, "No supply this tick", "#6fa86f")}
+            <div style={{ color: "#ff7777", fontSize: 8, margin: "5px 0 2px" }}>Demand</div>
+            {renderBreakdownLines(data.minus, "No demand this tick", "#b67878")}
             <div style={{ marginTop: 6, borderTop: "1px solid #1a2535", paddingTop: 4, color: "#8aa", fontSize: 8, fontFamily: "monospace" }}>
-              Net this tick: {data.net > 0 ? `+${data.net.toFixed(1)}` : data.net.toFixed(1)}
+              Net this tick: {tooltipNet > 0 ? `+${tooltipNet.toFixed(1)}` : tooltipNet.toFixed(1)}
             </div>
           </div>
         );
