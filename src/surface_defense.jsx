@@ -186,8 +186,9 @@ const WAVES = [
 ];
 
 export default function SurfaceDefense({ active = true, scrap: initialScrap = 80, onScrapChange, raidSize: initialRaidSize = "medium", wealthBracket = 0, sentryWorkers = 0, onRaidWon, onRaidLost, onBunkerDestroyed }) {
-  const [phase, setPhase] = useState("prep"); // prep | combat | won | lost
+  const [phase, setPhase] = useState("prep"); // prep | intermission | combat | won | lost
   const [scrap, setScrap] = useState(initialScrap);
+  const [countdown, setCountdown] = useState(10); // inter-wave countdown (seconds)
   const [hatchHp, setHatchHp] = useState(100);
   const [selectedTool, setSelectedTool] = useState("turret");
   const [waveIdx, setWaveIdx] = useState(0);
@@ -218,6 +219,8 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
     spawnQueue: [],
     spawnTimer: 0,
     tick: 0,
+    intermissionTick: 0,
+    lastCountdown: 10,
   });
   const rafRef = useRef(null);
   const selectedToolRef = useRef("turret");
@@ -256,6 +259,7 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
       range: 140,
     } : null;
     s.spawnQueue = []; s.spawnTimer = 0; s.tick = 0;
+    s.intermissionTick = 0; s.lastCountdown = 10;
     raidLostTriggeredRef.current = false;
     bunkerDestroyedTriggeredRef.current = false;
     winLostTimeoutsRef.current.forEach(clearTimeout);
@@ -301,7 +305,7 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
 
   const handleCanvasClick = useCallback((e) => {
     const s = stateRef.current;
-    if (s.phase !== "prep") return;
+    if (s.phase !== "prep" && s.phase !== "intermission") return;
     const rect = canvasRef.current.getBoundingClientRect();
     const scaleX = W / rect.width;
     const x = (e.clientX - rect.left) * scaleX;
@@ -336,6 +340,34 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
     const loop = () => {
       const s = stateRef.current;
       s.tick++;
+
+      // ── INTERMISSION COUNTDOWN ──
+      if (s.phase === "intermission") {
+        s.intermissionTick++;
+        const INTERMISSION_FRAMES = 600; // 10 seconds at ~60fps
+        const secsLeft = Math.max(1, Math.ceil((INTERMISSION_FRAMES - s.intermissionTick) / 60));
+        if (secsLeft !== s.lastCountdown) {
+          s.lastCountdown = secsLeft;
+          setCountdown(secsLeft);
+        }
+        if (s.intermissionTick >= INTERMISSION_FRAMES) {
+          // Auto-start next wave
+          const idx = s.waveIdx;
+          s.phase = "combat";
+          setPhase("combat");
+          const wave = generateWave(idx, s.totalWaves, s.wealthBracket);
+          const queue = [];
+          wave.forEach(group => {
+            for (let i = 0; i < group.count; i++) {
+              queue.push({ type: group.type, side: group.side, delay: group.interval * i + (group.side === "left" ? 30 : 0) });
+            }
+          });
+          queue.sort((a, b) => a.delay - b.delay);
+          s.spawnQueue = queue;
+          s.spawnTimer = 0;
+          showMessage(`WAVE ${idx + 1} — ${getWaveLabel(idx, s.totalWaves)}`, 2000);
+        }
+      }
 
       // ── SPAWN ──
       if (s.phase === "combat") {
@@ -605,8 +637,11 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
           } else {
             s.waveIdx += 1;
             setWaveIdx(s.waveIdx);
-            s.phase = "prep";
-            setPhase("prep");
+            s.phase = "intermission";
+            s.intermissionTick = 0;
+            s.lastCountdown = 10;
+            setCountdown(10);
+            setPhase("intermission");
             showMessage(`WAVE ${s.waveIdx} CLEARED — +${bonus} SCRAP BONUS`, 2500);
           }
         }
@@ -667,8 +702,8 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
       ctx.fillStyle = hpRatio > 0.5 ? "#22cc44" : hpRatio > 0.25 ? "#cc8800" : "#cc2200";
       ctx.fillRect(HATCH_X - 25, GROUND_Y - 20, 50 * hpRatio, 5);
 
-      // ── Defense range preview (prep mode) ──
-      if (s.phase === "prep") {
+      // ── Defense range preview (prep + intermission mode) ──
+      if (s.phase === "prep" || s.phase === "intermission") {
         s.defenses.forEach(d => {
           if (d.range === 0) return;
           ctx.beginPath();
@@ -924,7 +959,7 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
         onClick={handleCanvasClick}
         style={{
           display: active ? "block" : "none",
-          cursor: phase === "prep" ? "crosshair" : "default",
+          cursor: (phase === "prep" || phase === "intermission") ? "crosshair" : "default",
           width: "100%",
           maxWidth: W,
           border: "1px solid #1a1208",
@@ -952,6 +987,7 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
         </span>
         <span style={{ color: "#4ab3f4", fontSize: 9, letterSpacing: 2 }}>
           {phase === "prep" ? `WAVE ${waveIdx + 1} — PLACE DEFENSES` :
+           phase === "intermission" ? `WAVE ${waveIdx + 1} — NEXT WAVE IN ${countdown}s` :
            phase === "combat" ? `WAVE ${waveIdx + 1} — COMBAT` :
            phase === "won" ? "RAID REPELLED" : "BREACH"}
         </span>
@@ -1024,8 +1060,13 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
             cursor: "pointer",
             borderRadius: 2,
           }}>
-            ▶ SEND WAVE {waveIdx + 1}
+            ▶ {waveIdx === 0 ? "START RAID" : `SEND WAVE ${waveIdx + 1}`}
           </button>
+        )}
+        {phase === "intermission" && (
+          <span style={{ color: "#ff8800", fontSize: 9, letterSpacing: 2 }}>
+            ⏱ NEXT WAVE IN {countdown}s — PLACE DEFENSES
+          </span>
         )}
         {phase === "combat" && (
           <span style={{ color: "#cc3311", fontSize: 9, letterSpacing: 2, animation: "pulse 1s infinite" }}>
@@ -1038,7 +1079,7 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
       {/* Instructions */}
       <div style={{ width: W, padding: "6px 12px", background: "#050403", border: "1px solid #111", borderTop: "none" }}>
         <div style={{ color: "#223", fontSize: 8, letterSpacing: 1 }}>
-          {phase === "prep"
+          {(phase === "prep" || phase === "intermission")
             ? "CLICK SURFACE TO PLACE DEFENSES · TURRETS AUTO-FIRE · BARRICADES BLOCK · MISSILES LONG RANGE"
             : phase === "combat" ? "DEFEND THE HATCH · EARN SCRAP FROM KILLS"
             : phase === "won" ? "ALL THREATS NEUTRALIZED — COLONY SECURE"

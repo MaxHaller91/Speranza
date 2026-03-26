@@ -195,6 +195,8 @@ export default function Speranza() {
   useEffect(() => { heatRef.current             = heat;             }, [heat]);
   useEffect(() => { firedDilemmasRef.current    = firedDilemmas;    }, [firedDilemmas]);
   useEffect(() => { heatSuppressedTicksRef.current = heatSuppressedTicks; }, [heatSuppressedTicks]);
+  // Raid cooldown — starts at 48 (one in-game day) to block raids on fresh game
+  const raidCooldownTicksRef = useRef(48);
 
   // ── Track mouse position for tooltips ───────────────────────────────────
   useEffect(() => {
@@ -922,7 +924,7 @@ export default function Speranza() {
             setSurfaceDefenseActive(true);
             setPendingRaidSize(sizeKey);
             setPendingWealthBracket(rw.wealthBracket ?? 0);
-            setTimescale(1);
+            setTimescale(0); // pause colony so player can place defenses
             raidSuppressedThisRaidRef.current = 0;
             setActiveRaid({ sizeKey, ticksLeft: sizeDef.duration, strikeCountdown: sizeDef.strikeEvery });
             pushEventTrace("raid_launched", null, sizeKey);
@@ -955,6 +957,8 @@ export default function Speranza() {
         g.forEach(row => row.forEach(cell => {
           if (cell.type === "sentryPost") sentryCount += cell.workers;
         }));
+        // Decrement raid cooldown each tick; blocks raid window from opening
+        if (raidCooldownTicksRef.current > 0) raidCooldownTicksRef.current--;
         setHeat(prev => {
           const gain    = heatGainSuppressed ? 0 : (HEAT_BASE_GAIN + builtRooms * HEAT_GAIN_PER_ROOM) * condThreatMult;
           const sentry  = sentryCount * HEAT_SENTRY_REDUCTION;
@@ -962,7 +966,7 @@ export default function Speranza() {
           // Probability-based raid trigger
           const raidChance = HEAT_RAID_PROB_BASE + (next / HEAT_MAX) * HEAT_RAID_PROB_SCALE;
           const condRaidMult = surfaceConditionRef.current.effects.raidFreqMult ?? 1.0;
-          if (tickRef.current % 48 === 0 && Math.random() < raidChance * condRaidMult) {
+          if (tickRef.current % 48 === 0 && raidCooldownTicksRef.current <= 0 && Math.random() < raidChance * condRaidMult) {
             // Determine starting size based on heat state
             const hState = getHeatState(next);
             const wealth = calcColonyWealth(resRef.current, gridRef.current, colonistsRef.current);
@@ -1786,6 +1790,7 @@ export default function Speranza() {
     setPendingWealthBracket(0);
     setRaidWindow(null);
     setActiveRaid(null);
+    raidCooldownTicksRef.current = 48; // one in-game day cooldown before next raid can open
     unduckMusic();
     playRaidOver();
     setColonists(prev => prev.map(c => ({ ...c, raidsSurvived: (c.raidsSurvived ?? 0) + 1 })));
@@ -1820,6 +1825,7 @@ export default function Speranza() {
     setSurfaceDefenseActive(false);
     setPendingRaidSize(null);
     setPendingWealthBracket(0);
+    raidCooldownTicksRef.current = 48; // one in-game day cooldown before next raid can open
     unduckMusic();
     addLog("⚠ Surface defenses breached — Arc forces entering colony.");
   };
