@@ -9,7 +9,7 @@ const PAGES = [
     title: "WELCOME, COMMANDER",
     subtitle: "What is Speranza?",
     bullets: [
-      "You command an underground colony beneath an Arc-controlled surface. Your job: keep your people alive, build deeper, and push back.",
+      "You command an underground colony beneath an Arc-controlled surface. Your job: keep your people alive and build deeper while the Arc hunts you from above.",
       "Every room you build and every expedition you run raises your Arc threat signature. The Arc doesn't care — until it does.",
       "Use the ⏸ / 1× / 4× timescale buttons at the top to control pace. Pausing is free — use it whenever you need to think.",
     ],
@@ -32,7 +32,7 @@ const PAGES = [
     bullets: [
       "The Heat meter has 5 states: UNDETECTED → SCANNING → TARGETED → HUNTED → MARKED. Every room and expedition adds heat. It decays slowly on its own.",
       "When heat peaks, a Raid Window opens — the colony pauses and you enter the surface defense minigame. Place turrets, barricades, and missiles to stop Arc units reaching the hatch.",
-      "Raids come in 3 sizes: SMALL (1 target), MEDIUM (2 targets), LARGE (3 targets). At MARKED heat, sizes escalate and waves grow denser.",
+      "Raids come in 3 sizes: SMALL (20-tick duration, light waves), MEDIUM (30 ticks, heavier assault), LARGE (60-tick siege with air units — hits 3 rooms per strike if the surface is breached). At MARKED heat, sizes escalate.",
       "Build a Research Lab (45 scrap) to earn RP. Spend it on: Barricades (50 RP, 40% block chance), Sentry Post (75 RP, −5 heat/tick per worker), Radio Tower (75 RP, reveals raid size), Shelter (100 RP, alarm keeps colonists immune from strikes).",
     ],
   },
