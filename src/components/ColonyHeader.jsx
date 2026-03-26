@@ -30,6 +30,7 @@ export default function ColonyHeader({
   journalOpen, effectsOpen,
   onTimescale, onMusicVolume, onRecruit, onToggleJournal, onToggleEffects, onHoverMorale, onBugReport,
   saveLocked, saveLockReason, onSaveNow, onLoadAutosave, onExportSave, onImportSave, onDeleteAutosaves,
+  onOpenHelp,
 }) {
   const moraleColor = morale > 50 ? "#7ed321" : morale > 0 ? "#f5a623" : morale > -50 ? "#ff7744" : "#ff2222";
   const moraleTier  = morale > 75 ? "THRIVING" : morale > 25 ? "STABLE" : morale > 0 ? "UNEASY" : morale > -50 ? "STRAINED" : morale > -75 ? "FRACTURED" : "COLLAPSE";
@@ -183,6 +184,23 @@ export default function ColonyHeader({
                 letterSpacing: 0.5,
               }}
             >⌫</button>
+            <button
+              title="Field Manual / How to Play"
+              onClick={(e) => { e.stopPropagation(); onOpenHelp(); }}
+              style={{
+                background: "#0a0f1a",
+                border: "1px solid #1e3a5f",
+                borderRadius: 3,
+                color: "#4ab3f4",
+                padding: "2px 7px",
+                cursor: "pointer",
+                fontSize: 10,
+                fontFamily: "monospace",
+                marginLeft: 4,
+                letterSpacing: 0.5,
+                fontWeight: "bold",
+              }}
+            >?</button>
             {timescale === 0 && (
               <span style={{ color: "#f5a623", fontSize: 8, marginLeft: 3, letterSpacing: 1 }}>PAUSED</span>
             )}

@@ -49,6 +49,7 @@ import FlowPanel      from './components/FlowPanel.jsx';
 import ColonistRoster from './components/ColonistRoster.jsx';
 import ColonyGrid     from './components/ColonyGrid.jsx';
 import SidePanel      from './components/SidePanel.jsx';
+import HelpModal      from './components/HelpModal.jsx';
 
 export default function Speranza() {
   const [grid,       setGrid]       = useState(initGrid);
@@ -117,6 +118,10 @@ export default function Speranza() {
   const [activeDilemma,         setActiveDilemma]         = useState(null);
   const [dilemmaTimer,          setDilemmaTimer]          = useState(0);
   const [firedDilemmas,         setFiredDilemmas]         = useState([]);
+  // Help / quickstart modal
+  const HELP_SEEN_KEY = "speranza_help_seen";
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [helpPage, setHelpPage] = useState(0);
   const [recentDilemmaOutcomes, setRecentDilemmaOutcomes] = useState([]);
   const [historyLog,            setHistoryLog]            = useState([]);
   const [heatSuppressedTicks,   setHeatSuppressedTicks]   = useState(0);
@@ -197,6 +202,21 @@ export default function Speranza() {
   useEffect(() => { heatSuppressedTicksRef.current = heatSuppressedTicks; }, [heatSuppressedTicks]);
   // Raid cooldown — starts at 48 (one in-game day) to block raids on fresh game
   const raidCooldownTicksRef = useRef(48);
+
+  // ── Auto-open help modal on first play ──────────────────────────────────
+  useEffect(() => {
+    if (!localStorage.getItem(HELP_SEEN_KEY)) {
+      setHelpOpen(true);
+      setTimescale(0); // pause while reading
+    }
+  }, []);
+
+  const handleCloseHelp = () => {
+    localStorage.setItem(HELP_SEEN_KEY, "1");
+    setHelpOpen(false);
+    setHelpPage(0);
+    setTimescale(1); // resume after closing
+  };
 
   // ── Track mouse position for tooltips ───────────────────────────────────
   useEffect(() => {
@@ -2128,6 +2148,7 @@ export default function Speranza() {
         onExportSave={handleExportSave}
         onImportSave={handleImportSave}
         onDeleteAutosaves={handleDeleteAutosaves}
+        onOpenHelp={() => { setHelpPage(0); setHelpOpen(true); }}
       />
 
       <RaidBanner
@@ -2142,6 +2163,14 @@ export default function Speranza() {
       <GameOverModal gameOver={gameOver} historyLog={historyLog} onRestart={handleRestart} />
 
       <DilemmaModal activeDilemma={activeDilemma} onChoice={handleDilemmaChoice} />
+
+      <HelpModal
+        isOpen={helpOpen}
+        page={helpPage}
+        onNext={() => setHelpPage(p => Math.min(p + 1, 4))}
+        onPrev={() => setHelpPage(p => Math.max(p - 1, 0))}
+        onClose={handleCloseHelp}
+      />
 
       {buildMenu && selCell && !selCell.type && (
         <BuildMenu
