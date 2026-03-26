@@ -69,3 +69,32 @@ When resuming work:
   - props-only components in `src/components/`
 - Brittle line-number instructions were removed in favor of section/function-oriented guidance.
 - The docs now tell future implementation work to verify live code assumptions first before editing.
+
+## Step 1 Raid Stabilization Work — 2026-03-26
+- Step 5 in `Raid Improvements/` is now explicitly deferred until a real building-upgrade system exists.
+- Step 1 implementation work has started and the first bug-fix pass landed in live code.
+- Confirmed code changes made this session:
+  - removed fled-colonist ghost behavior by removing `raidFled` colonists from `colonists[]` instead of setting them back to idle
+  - removed the visible post-win/post-loss RESTART button from `surface_defense.jsx`
+  - added duplicate-loss-callback protection in `surface_defense.jsx`
+  - added cleanup/tracking for delayed win/loss + message timeouts in `surface_defense.jsx`
+- The underground strike suppression guard was already present in live `Speranza.jsx` when this session began and was intentionally left in place.
+- The raid-size debug selector was already absent in live `surface_defense.jsx` when this session began.
+
+## Raid Improvements Implementation Progress — 2026-03-26
+- Step 2 implemented in `src/surface_defense.jsx`:
+  - added flying enemy types (`drone`, `gunship`)
+  - added drone attack-run behavior
+  - added gunship rocket splash behavior
+  - added flying-unit rendering and turret air-damage penalty
+- Step 3 implemented across `src/Speranza.jsx` and `src/surface_defense.jsx`:
+  - `Speranza.jsx` now derives `sentryWorkers`
+  - `SurfaceDefense` now receives sentry worker count and renders a bunker
+  - bunker destruction reports back to colony state and injures sentry workers
+- Step 4 implemented across `src/gameData.js`, `src/Speranza.jsx`, and `src/surface_defense.jsx`:
+  - added pure helpers `calcColonyWealth()` and `getWealthBracket()` to `gameData.js`
+  - raid severity now uses colony wealth instead of only heat-state mapping
+  - wealth bracket is passed into `SurfaceDefense` and scales wave density
+- Production build passed after Steps 1–4 code changes.
+- New planning follow-up added: **Step 4B — Raid Cadence, Pause, and Prep Flow Polish**.
+- That step captures the newly reported issues around immediate raids, back-to-back raids, pause-on-start, Start Raid wording, 10-second inter-wave countdowns, and scrap UI sync.

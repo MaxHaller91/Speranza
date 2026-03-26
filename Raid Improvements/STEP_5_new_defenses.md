@@ -1,5 +1,11 @@
 # Step 5 — New Defenses (Armory-Locked)
 
+## Status
+
+**Deferred until a real building-upgrade system exists in the colony layer.**
+
+Do not implement this step yet.
+
 ## Purpose
 
 Add specialized defensive answers for the expanded raid roster.

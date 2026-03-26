@@ -298,6 +298,22 @@ export function isSaveLockedByRaidState({ raidWindow, activeRaid, surfaceDefense
   return !!(raidWindow || activeRaid || surfaceDefenseActive || pendingRaidSize);
 }
 
+export function calcColonyWealth(res, grid, colonists) {
+  const resourceWealth = (res?.scrap ?? 0) + (res?.energy ?? 0) + (res?.food ?? 0) + (res?.water ?? 0);
+  let builtRooms = 0;
+  grid?.forEach(row => row?.forEach(cell => { if (cell?.type) builtRooms += 1; }));
+  const roomWealth = builtRooms * 40;
+  const popWealth = (colonists?.length ?? 0) * 15;
+  return resourceWealth + roomWealth + popWealth;
+}
+
+export function getWealthBracket(wealth) {
+  if (wealth < 300) return 0;
+  if (wealth < 600) return 1;
+  if (wealth < 1000) return 2;
+  return 3;
+}
+
 // ─── Row-Based Raid Targeting ─────────────────────────────────────────────────
 export function weightedTargetPick(colonists, grid, sizeDef) {
   const rowWeights = [4, 3, 2, 1];

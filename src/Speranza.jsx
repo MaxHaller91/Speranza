@@ -31,6 +31,7 @@ import {
   EXPEDITION_TYPES, EXPEDITION_ROLL_TABLES, applyMoraleModifier,
   DRAIN_PER_COL, clamp, EMPTY_STAT_BREAKDOWN,
   isSaveLockedByRaidState,
+  calcColonyWealth, getWealthBracket,
   weightedTargetPick, initColonists, initGrid, INIT_RES,
   STATUS_COLOR, STATUS_LABEL, tickToDayHour, checkMilestoneTrigger,
   earthTexture,
@@ -73,6 +74,7 @@ export default function Speranza() {
   const [raidFlash,  setRaidFlash]  = useState(false);
   const [surfaceDefenseActive, setSurfaceDefenseActive] = useState(false);
   const [pendingRaidSize, setPendingRaidSize] = useState(null);
+  const [pendingWealthBracket, setPendingWealthBracket] = useState(0);
   const [toasts,     setToasts]     = useState([]);
   // raidWindow: null | { sizeIdx: 0|1|2, escalations: number }
   // sizeIdx indexes into RAID_SIZE_ORDER
@@ -579,6 +581,7 @@ export default function Speranza() {
       setActiveRaid(null);
       setSurfaceDefenseActive(false);
       setPendingRaidSize(null);
+      setPendingWealthBracket(0);
       setTimescale(0);
 
       addLog("💾 Save loaded. Game paused for safe resume.");
@@ -918,6 +921,7 @@ export default function Speranza() {
           } else {
             setSurfaceDefenseActive(true);
             setPendingRaidSize(sizeKey);
+            setPendingWealthBracket(rw.wealthBracket ?? 0);
             setTimescale(1);
             raidSuppressedThisRaidRef.current = 0;
             setActiveRaid({ sizeKey, ticksLeft: sizeDef.duration, strikeCountdown: sizeDef.strikeEvery });
@@ -928,8 +932,11 @@ export default function Speranza() {
             playRaid();
             setRaidFlash(true);
             setTimeout(() => setRaidFlash(false), 800);
-            addLog(`⚔ ${sizeDef.icon} ${sizeDef.label} RAID UNDERWAY — ${sizeDef.duration} ticks! First strike in ${sizeDef.strikeEvery}.`);
-            addToast(`⚔ ${sizeDef.label} RAID IN PROGRESS\nArc forces breaching the perimeter.\nFirst strike in ${sizeDef.strikeEvery} ticks.`, "raid", { key: `raid-start-${sizeKey}` });
+            if (!currentTickToastTagsRef.current.includes("raid_launch_announcement")) {
+              currentTickToastTagsRef.current.push("raid_launch_announcement");
+              addLog(`⚔ ${sizeDef.icon} ${sizeDef.label} RAID UNDERWAY — ${sizeDef.duration} ticks! First strike in ${sizeDef.strikeEvery}.`);
+              addToast(`⚔ ${sizeDef.label} RAID IN PROGRESS\nArc forces breaching the perimeter.\nFirst strike in ${sizeDef.strikeEvery} ticks.`, "raid", { key: `raid-start-${sizeKey}` });
+            }
           }
         } else {
           const nextSizeIdx = Math.min(rw.sizeIdx + 1, RAID_SIZE_ORDER.length - 1);
@@ -958,13 +965,18 @@ export default function Speranza() {
           if (tickRef.current % 48 === 0 && Math.random() < raidChance * condRaidMult) {
             // Determine starting size based on heat state
             const hState = getHeatState(next);
+            const wealth = calcColonyWealth(resRef.current, gridRef.current, colonistsRef.current);
+            const wealthBracket = getWealthBracket(wealth);
             let sizeIdx = 0;
-            if (hState.label === "TARGETED" || hState.label === "HUNTED") sizeIdx = 1;
-            if (hState.label === "MARKED") sizeIdx = Math.random() < 0.4 ? 2 : 1;
-            setRaidWindow({ sizeIdx, escalations: 0 });
+            if (wealthBracket === 1) sizeIdx = Math.random() < 0.25 ? 1 : 0;
+            if (wealthBracket === 2) sizeIdx = Math.random() < 0.25 ? 2 : 1;
+            if (wealthBracket === 3) sizeIdx = Math.random() < 0.50 ? 2 : 1;
+            if (hState.label === "MARKED" && sizeIdx < 2) sizeIdx = Math.min(sizeIdx + 1, 2);
+            setRaidWindow({ sizeIdx, escalations: 0, wealthBracket });
             pushEventTrace("raid_window_opened", null, RAID_SIZE_ORDER[sizeIdx]);
             const hLabel = hState.label;
-            addLog(`☢ ${hLabel === "MARKED" ? "⚠ MARKED — " : ""}Arc forces detected — raid incoming!`);
+            const wealthLabels = ["STRUGGLING", "ESTABLISHED", "PROSPEROUS", "WEALTHY"];
+            addLog(`☢ ${hLabel === "MARKED" ? "⚠ MARKED — " : ""}Arc forces detected — raid incoming! [${wealthLabels[wealthBracket]}]`);
             const sensitives = cols.filter(c => c.quirk?.id === "arcSensitive");
             if (sensitives.length > 0 && Math.random() < 0.2) {
               const warnCol = sensitives[Math.floor(Math.random() * sensitives.length)];
@@ -1063,7 +1075,7 @@ export default function Speranza() {
                   addLog(`💢 ${sizeDef.icon} ARC STRIKE — ${target.name} barely made it out.`);
                   changeMoraleRef.current(-2, "close call");
                 } else {
-                  setColonists(prev => prev.map(c => c.id === target.id ? { ...c, status: "idle" } : c));
+                  setColonists(prev => prev.filter(c => c.id !== target.id));
                   addToMemorialRef.current(target, "raidFled", tickRef.current);
                   pushEventTrace("colonist_fled", target.name, null);
                   addLog(`💢 ${sizeDef.icon} ARC STRIKE — ${target.name} fled their post!`);
@@ -1771,6 +1783,7 @@ export default function Speranza() {
     const wonSize = pendingRaidSize;
     setSurfaceDefenseActive(false);
     setPendingRaidSize(null);
+    setPendingWealthBracket(0);
     setRaidWindow(null);
     setActiveRaid(null);
     unduckMusic();
@@ -1806,6 +1819,7 @@ export default function Speranza() {
     pushEventTrace("raid_resolved_lost", null, null);
     setSurfaceDefenseActive(false);
     setPendingRaidSize(null);
+    setPendingWealthBracket(0);
     unduckMusic();
     addLog("⚠ Surface defenses breached — Arc forces entering colony.");
   };
@@ -2031,6 +2045,7 @@ export default function Speranza() {
     currentTickToastTagsRef.current = [];
     setSurfaceDefenseActive(false);
     setPendingRaidSize(null);
+    setPendingWealthBracket(0);
   };
 
   // ── Derived UI ────────────────────────────────────────────────────────────
@@ -2042,8 +2057,20 @@ export default function Speranza() {
   const heatPct       = (heat / HEAT_MAX) * 100;
   const shelteredCount = colonists.filter(c => c.status === "sheltered").length;
   const memorialHallBuilt = grid.flatMap(r => r).some(c => c.type === "memorial");
+  const sentryWorkers = grid.reduce((sum, row) => sum + row.reduce((rowSum, cell) => rowSum + (cell.type === "sentryPost" ? cell.workers : 0), 0), 0);
   const saveLocked = isSaveLockedByRaidState({ raidWindow, activeRaid, surfaceDefenseActive, pendingRaidSize });
   const saveLockReason = "Save/load disabled during raid events";
+
+  const handleBunkerDestroyed = () => {
+    setColonists(prev => prev.map(c => c.status === "onSentry"
+      ? { ...c, status: "injured", injuryTicksLeft: INJURY_TICKS_BASE, injuryCount: (c.injuryCount ?? 0) + 1 }
+      : c
+    ));
+    addLog("💥 Surface bunker destroyed — sentry workers are injured.");
+    addToast("💥 BUNKER DESTROYED\nSentry workers caught in the blast.\nAll sentries injured.", "injury", { key: `bunker-destroyed-${tickRef.current}` });
+    playInjury();
+    changeMoraleRef.current(-8, "bunker destroyed");
+  };
 
 
 
@@ -2133,9 +2160,12 @@ export default function Speranza() {
             scrap={res.scrap}
             onScrapChange={(delta) => setRes(r => ({ ...r, scrap: Math.max(0, r.scrap + delta) }))}
             raidSize={pendingRaidSize ?? "small"}
+            wealthBracket={pendingWealthBracket}
+            sentryWorkers={sentryWorkers}
             active={surfaceDefenseActive}
             onRaidWon={handleSurfaceRaidWon}
             onRaidLost={handleSurfaceRaidLost}
+            onBunkerDestroyed={handleBunkerDestroyed}
           />
 
           <ColonyGrid

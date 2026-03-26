@@ -58,7 +58,8 @@ Use these ownership rules:
 | 2 | Flying Arc Units | `src/surface_defense.jsx` | Add air threats that bypass barricades |
 | 3 | Sentry Post → Bunker Integration | `src/Speranza.jsx`, `src/surface_defense.jsx` | Make colony sentry staffing show up in the minigame |
 | 4 | Wealth-Scaling Raids | `src/gameData.js`, `src/Speranza.jsx`, `src/surface_defense.jsx` | Make raid severity reflect colony success |
-| 5 | New Defenses (Armory-Locked) | `src/Speranza.jsx`, `src/surface_defense.jsx` | Add dedicated anti-air and crowd-control tools |
+| 4B | Raid Cadence, Pause, and Prep Flow Polish | `src/Speranza.jsx`, `src/surface_defense.jsx` | Fix raid timing, cooldowns, pause behavior, and prep/countdown flow |
+| 5 | New Defenses (Armory-Locked) | `src/Speranza.jsx`, `src/surface_defense.jsx` | **Deferred until a real building-upgrade system exists** |
 
 ---
 
@@ -106,7 +107,36 @@ Ownership:
 - raid-trigger integration belongs in `Speranza.jsx`
 - wave-density tuning inside the minigame belongs in `surface_defense.jsx`
 
+### Step 4B — Raid Cadence, Pause, and Prep Flow Polish
+
+This is the post-integration cleanup pass for raid pacing and player-facing flow.
+
+Goals:
+
+- prevent raids from firing immediately on a fresh game
+- prevent back-to-back raids by adding at least a one-day cooldown
+- keep heat as the raid-pressure system, but add a hard cooldown gate on raid-window creation
+- pause the colony when a raid starts so the player gets setup time
+- change the first prep button to **Start Raid**
+- give the player a paused setup phase when a raid begins
+- use a 10-second countdown between waves instead of indefinite manual starts
+- audit/fix raid scrap display so minigame scrap cannot drift from colony scrap
+
+Ownership:
+
+- `Speranza.jsx` owns raid cooldowns, first-day grace, and pause-on-raid-start behavior
+- `surface_defense.jsx` owns the prep/intermission countdown flow and raid scrap display behavior
+
+Preferred implementation order inside this step:
+
+1. add a raid cooldown gate to the heat → raid-window pipeline
+2. pause colony time when surface defense activates
+3. refactor wave flow to use Start Raid + 10-second inter-wave countdowns
+4. audit and fix scrap sync so raid UI and colony scrap stay aligned
+
 ### Step 5 — New Defenses (Armory-Locked)
+
+**Status: Deferred until the colony has a real building-upgrade system.**
 
 Add two new placeable defenses:
 
@@ -139,7 +169,8 @@ Implement in this order only:
 2. Step 2
 3. Step 3
 4. Step 4
-5. Step 5
+5. Step 4B
+6. Step 5 (only after building upgrades exist)
 
 ---
 

@@ -44,16 +44,41 @@ const ENEMY_TYPES = {
   grunt: { hp: 40, maxHp: 40, speed: 0.5, damage: 8, reward: 10, w: 12, color: "#cc2200" },
   heavy: { hp: 120, maxHp: 120, speed: 0.25, damage: 20, reward: 25, w: 18, color: "#880000" },
   runner: { hp: 20, maxHp: 20, speed: 1.1, damage: 5, reward: 8, w: 10, color: "#ff4400" },
+  drone: {
+    hp: 25, maxHp: 25,
+    speed: 0.9,
+    damage: 6,
+    reward: 12,
+    w: 10,
+    color: "#ff6600",
+    flying: true,
+    altitude: 55,
+    burstCount: 3,
+    burstInterval: 8,
+  },
+  gunship: {
+    hp: 180, maxHp: 180,
+    speed: 0.22,
+    damage: 45,
+    reward: 40,
+    w: 28,
+    color: "#cc2200",
+    flying: true,
+    altitude: 28,
+    splashRadius: 55,
+    rocketSpeed: 2.5,
+  },
 };
 
 
 // Raid sizes: small=3 waves, medium=5 waves, large=8 waves
 const RAID_SIZES = { small: 3, medium: 5, large: 8 };
 
-function generateWave(waveIdx) {
+function generateWave(waveIdx, totalWaves, wealthBracket = 0) {
   const w = waveIdx;
   const groups = [];
-  const gruntCount = 2 + Math.floor(w * 1.5);
+  const intensityMult = 1 + (wealthBracket * 0.25);
+  const gruntCount = Math.max(1, Math.round((2 + Math.floor(w * 1.5)) * intensityMult));
   groups.push({ type: "grunt", side: "right", count: gruntCount, interval: Math.max(20, 55 - w * 4) });
   if (w >= 1) groups.push({ type: "grunt", side: "left", count: Math.ceil(gruntCount * 0.6), interval: Math.max(25, 60 - w * 4) });
   if (w >= 2) groups.push({ type: "runner", side: w % 2 === 0 ? "right" : "left", count: 1 + Math.floor((w - 1) * 0.8), interval: Math.max(18, 40 - w * 3) });
@@ -62,6 +87,14 @@ function generateWave(waveIdx) {
   if (w >= 7) {
     groups.push({ type: "runner", side: "left", count: 3 + Math.floor((w - 6) * 0.5), interval: 15 });
     groups.push({ type: "runner", side: "right", count: 3 + Math.floor((w - 6) * 0.5), interval: 15 });
+  }
+  if (totalWaves >= 8 && w >= 1) {
+    groups.push({ type: "drone", side: w % 2 === 0 ? "right" : "left", count: 1 + Math.floor(w * 0.5), interval: Math.max(30, 50 - w * 3) });
+  } else if (totalWaves >= 5 && w >= 2) {
+    groups.push({ type: "drone", side: w % 2 === 0 ? "right" : "left", count: 1 + Math.floor((w - 1) * 0.5), interval: Math.max(32, 52 - w * 3) });
+  }
+  if (totalWaves >= 8 && w >= 2 && w % 3 === 2) {
+    groups.push({ type: "gunship", side: w % 2 === 0 ? "left" : "right", count: 1, interval: 180 });
   }
   return groups;
 }
@@ -72,16 +105,30 @@ let pid = 0;
 
 function makeEnemy(side, type = "grunt") {
   const def = ENEMY_TYPES[type];
+  const flying = def.flying ?? false;
   return {
     id: eid++, type,
     x: side === "left" ? -20 : W + 20,
-    y: GROUND_Y,
+    y: flying ? def.altitude : GROUND_Y,
     dir: side === "left" ? 1 : -1,
     hp: def.hp, maxHp: def.maxHp,
     speed: def.speed, damage: def.damage, reward: def.reward, w: def.w,
     color: def.color,
+    flying,
+    altitude: def.altitude ?? GROUND_Y,
+    originalSide: side,
     attackCooldown: 0,
     hatchCooldown: 0,
+    burstCount: def.burstCount ?? 0,
+    burstInterval: def.burstInterval ?? 0,
+    burstRemaining: 0,
+    burstTimer: 0,
+    attackPhase: "approach",
+    loopTimer: 0,
+    splashRadius: def.splashRadius ?? 0,
+    rocketSpeed: def.rocketSpeed ?? 5,
+    targetX: null,
+    targetY: null,
     dead: false,
   };
 }
@@ -113,6 +160,24 @@ function makeProjectile(sx, sy, tx, ty, damage, color) {
   };
 }
 
+function makeRocket(sx, sy, tx, ty, damage, color, splashRadius, speed, targetType = "defense") {
+  const dx = tx - sx;
+  const dy = ty - sy;
+  const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+  return {
+    id: pid++, x: sx, y: sy,
+    vx: (dx / dist) * speed,
+    vy: (dy / dist) * speed,
+    damage, color,
+    splash: true,
+    splashRadius,
+    targetX: tx,
+    targetY: ty,
+    targetType,
+    dead: false,
+  };
+}
+
 const WAVES = [
   [{ type: "grunt", side: "right", count: 4, interval: 60 }],
   [{ type: "grunt", side: "right", count: 3, interval: 50 }, { type: "grunt", side: "left", count: 2, interval: 80 }],
@@ -120,7 +185,7 @@ const WAVES = [
   [{ type: "heavy", side: "left", count: 2, interval: 100 }, { type: "runner", side: "right", count: 5, interval: 30 }, { type: "grunt", side: "left", count: 4, interval: 50 }],
 ];
 
-export default function SurfaceDefense({ active = true, scrap: initialScrap = 80, onScrapChange, raidSize: initialRaidSize = "medium", onRaidWon, onRaidLost }) {
+export default function SurfaceDefense({ active = true, scrap: initialScrap = 80, onScrapChange, raidSize: initialRaidSize = "medium", wealthBracket = 0, sentryWorkers = 0, onRaidWon, onRaidLost, onBunkerDestroyed }) {
   const [phase, setPhase] = useState("prep"); // prep | combat | won | lost
   const [scrap, setScrap] = useState(initialScrap);
   const [hatchHp, setHatchHp] = useState(100);
@@ -148,18 +213,20 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
     phase: "prep",
     waveIdx: 0,
     totalWaves: RAID_SIZES["medium"],
+    wealthBracket: 0,
+    bunker: null,
     spawnQueue: [],
     spawnTimer: 0,
     tick: 0,
   });
   const rafRef = useRef(null);
   const selectedToolRef = useRef("turret");
+  const bunkerDestroyedTriggeredRef = useRef(false);
 
   // sync selectedTool to ref
   useEffect(() => { selectedToolRef.current = selectedTool; }, [selectedTool]);
-  const activeRef = useRef(active);
-  // Sync activeRef every render — needed by the RAF loop
-  useEffect(() => { activeRef.current = active; }, [active]);
+  const raidLostTriggeredRef = useRef(false);
+  const winLostTimeoutsRef = useRef([]);
 
   // Keep refs to initialScrap/raidSize so the reset effect can read them
   // without depending on them (avoids re-triggering reset on every scrap tick)
@@ -177,14 +244,38 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
     s.enemies = []; s.defenses = []; s.projectiles = [];
     s.scrap = startScrap; s.hatchHp = 100; s.phase = "prep";
     s.waveIdx = 0; s.totalWaves = RAID_SIZES[startRaidSize] ?? 5;
+    s.wealthBracket = wealthBracket;
+    s.bunker = sentryWorkers > 0 ? {
+      x: HATCH_X - 120,
+      hp: sentryWorkers * 60,
+      maxHp: sentryWorkers * 60,
+      slots: sentryWorkers,
+      fireCooldown: 0,
+      damage: 4,
+      fireRate: 20,
+      range: 140,
+    } : null;
     s.spawnQueue = []; s.spawnTimer = 0; s.tick = 0;
+    raidLostTriggeredRef.current = false;
+    bunkerDestroyedTriggeredRef.current = false;
+    winLostTimeoutsRef.current.forEach(clearTimeout);
+    winLostTimeoutsRef.current = [];
     setScrap(startScrap); setHatchHp(100); setPhase("prep");
     setWaveIdx(0); setMessage(null); setRaidSize(startRaidSize);
-  }, [active]); // ← only [active] — this breaks the feedback loop
+  }, [active, wealthBracket, sentryWorkers]);
+
+  useEffect(() => () => {
+    winLostTimeoutsRef.current.forEach(clearTimeout);
+    winLostTimeoutsRef.current = [];
+  }, []);
 
   const showMessage = (msg, ms = 1800) => {
     setMessage(msg);
-    setTimeout(() => setMessage(null), ms);
+    const timeoutId = setTimeout(() => {
+      setMessage(null);
+      winLostTimeoutsRef.current = winLostTimeoutsRef.current.filter(id => id !== timeoutId);
+    }, ms);
+    winLostTimeoutsRef.current.push(timeoutId);
   };
 
   const startWave = useCallback((idx) => {
@@ -195,7 +286,7 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
     setWaveIdx(idx);
 
     // Build spawn queue from generated wave
-    const wave = generateWave(idx);
+    const wave = generateWave(idx, s.totalWaves, s.wealthBracket);
     const queue = [];
     wave.forEach(group => {
       for (let i = 0; i < group.count; i++) {
@@ -234,17 +325,17 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
 
   // ─── GAME LOOP ─────────────────────────────────────────────────────────────
   useEffect(() => {
+    if (!active) {
+      cancelAnimationFrame(rafRef.current);
+      return undefined;
+    }
+
     const canvas = canvasRef.current;
     const ctx = canvas.getContext("2d");
 
     const loop = () => {
       const s = stateRef.current;
       s.tick++;
-
-      if (!activeRef.current) {
-        rafRef.current = requestAnimationFrame(loop);
-        return;
-      }
 
       // ── SPAWN ──
       if (s.phase === "combat") {
@@ -261,10 +352,76 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
         if (en.dead) return;
 
         // Check if blocked by barricade or other enemy
-        const blocking = s.defenses.find(d =>
+        const blocking = !en.flying && s.defenses.find(d =>
           !d.dead && d.type === "barricade" &&
           Math.abs(d.x - en.x) < 20 && Math.sign(d.x - en.x) === en.dir
         );
+
+        if (en.type === "drone") {
+          en.y = en.altitude + Math.sin((s.tick + en.id * 7) * 0.2) * 6;
+          const distToHatch = Math.abs(en.x - HATCH_X);
+          if (en.attackPhase === "approach") {
+            en.x += en.speed * en.dir;
+            if (distToHatch <= 80) {
+              en.attackPhase = "burst";
+              en.burstRemaining = en.burstCount;
+              en.burstTimer = 0;
+            }
+          } else if (en.attackPhase === "burst") {
+            en.burstTimer--;
+            if (en.burstRemaining > 0 && en.burstTimer <= 0) {
+              s.projectiles.push(makeProjectile(en.x, en.y, HATCH_X, GROUND_Y - 3, en.damage, en.color));
+              en.burstRemaining -= 1;
+              en.burstTimer = en.burstInterval;
+            }
+            if (en.burstRemaining <= 0) en.attackPhase = "retreat";
+          } else if (en.attackPhase === "retreat") {
+            en.x -= en.dir * en.speed * 1.2;
+            if (en.x < -40 || en.x > W + 40) {
+              en.attackPhase = "loop";
+              en.loopTimer = 90;
+            }
+          } else if (en.attackPhase === "loop") {
+            en.loopTimer -= 1;
+            if (en.loopTimer <= 0) {
+              en.x = en.originalSide === "left" ? -30 : W + 30;
+              en.dir = en.originalSide === "left" ? 1 : -1;
+              en.attackPhase = "approach";
+            }
+          }
+          return;
+        }
+
+        if (en.type === "gunship") {
+          en.y = en.altitude;
+          const stopX = en.originalSide === "left" ? W * 0.3 : W * 0.7;
+          if (en.attackPhase === "approach") {
+            en.x += en.speed * en.dir;
+            if ((en.dir > 0 && en.x >= stopX) || (en.dir < 0 && en.x <= stopX)) {
+              en.attackPhase = "burst";
+              en.attackCooldown = 90;
+            }
+          } else if (en.attackPhase === "burst") {
+            en.attackCooldown--;
+            if (en.attackCooldown <= 0) {
+              const target = s.defenses
+                .filter(d => !d.dead && Math.abs(d.x - en.x) <= 200)
+                .sort((a, b) => a.hp - b.hp)[0]
+                ?? s.defenses.filter(d => !d.dead).sort((a, b) => Math.abs(a.x - en.x) - Math.abs(b.x - en.x))[0];
+
+              if (target) {
+                s.projectiles.push(makeRocket(en.x, en.y, target.x, target.y - target.height / 2, en.damage, en.color, en.splashRadius, en.rocketSpeed));
+              } else {
+                s.projectiles.push(makeRocket(en.x, en.y, HATCH_X, GROUND_Y - 3, en.damage, en.color, en.splashRadius, en.rocketSpeed, "hatch"));
+              }
+              en.attackPhase = "retreat";
+            }
+          } else if (en.attackPhase === "retreat") {
+            en.x += en.speed * en.dir;
+            if (en.x < -50 || en.x > W + 50) en.dead = true;
+          }
+          return;
+        }
 
         if (blocking) {
           // Attack barricade
@@ -290,9 +447,16 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
             s.hatchHp -= en.damage;
             setHatchHp(Math.max(0, s.hatchHp));
             en.hatchCooldown = 45;
-            if (s.hatchHp <= 0) {
+            if (s.hatchHp <= 0 && !raidLostTriggeredRef.current) {
+              raidLostTriggeredRef.current = true;
               s.phase = "lost";
-              if (onRaidLost) setTimeout(onRaidLost, 1500);
+              if (onRaidLost) {
+                const timeoutId = setTimeout(() => {
+                  onRaidLost();
+                  winLostTimeoutsRef.current = winLostTimeoutsRef.current.filter(id => id !== timeoutId);
+                }, 1500);
+                winLostTimeoutsRef.current.push(timeoutId);
+              }
               setPhase("lost");
             }
           }
@@ -311,14 +475,31 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
           .sort((a, b) => Math.abs(a.x - def.x) - Math.abs(b.x - def.x))[0];
 
         if (target) {
+          const damage = def.type === "turret" && target.flying ? def.damage * 0.5 : def.damage;
           s.projectiles.push(makeProjectile(
             def.x, def.y - def.height + 4,
             target.x, target.y - 10,
-            def.damage, def.color
+            damage, def.color
           ));
           def.fireCooldown = def.fireRate;
         }
       });
+
+      // ── BUNKER ──
+      if (s.bunker && s.bunker.hp > 0) {
+        const bk = s.bunker;
+        bk.fireCooldown--;
+        if (bk.fireCooldown <= 0) {
+          const targets = s.enemies
+            .filter(en => !en.dead && Math.abs(en.x - bk.x) <= bk.range)
+            .sort((a, b) => Math.abs(a.x - bk.x) - Math.abs(b.x - bk.x))
+            .slice(0, bk.slots);
+          targets.forEach(t => {
+            s.projectiles.push(makeProjectile(bk.x, GROUND_Y - 20, t.x, t.y - 10, bk.damage, "#ffcc00"));
+          });
+          if (targets.length > 0) bk.fireCooldown = bk.fireRate;
+        }
+      }
 
       // ── PROJECTILES move + hit ──
       s.projectiles.forEach(p => {
@@ -326,6 +507,42 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
         p.x += p.vx;
         p.y += p.vy;
         if (p.x < -20 || p.x > W + 20 || p.y < -20 || p.y > H + 20) { p.dead = true; return; }
+
+        if (p.splash) {
+          const distToTarget = Math.sqrt((p.x - p.targetX) ** 2 + (p.y - p.targetY) ** 2);
+          if (distToTarget <= Math.max(6, Math.abs(p.vx) + Math.abs(p.vy))) {
+            s.defenses.forEach(d => {
+              if (!d.dead) {
+                const dist = Math.sqrt((d.x - p.x) ** 2 + ((d.y - d.height / 2) - p.y) ** 2);
+                if (dist <= p.splashRadius) {
+                  d.hp -= p.damage;
+                  if (d.hp <= 0) d.dead = true;
+                }
+              }
+            });
+            if (p.targetType === "hatch") {
+              const hatchDist = Math.sqrt((HATCH_X - p.x) ** 2 + ((GROUND_Y - 3) - p.y) ** 2);
+              if (hatchDist <= p.splashRadius) {
+                s.hatchHp -= Math.round(p.damage * 0.5);
+                setHatchHp(Math.max(0, s.hatchHp));
+                if (s.hatchHp <= 0 && !raidLostTriggeredRef.current) {
+                  raidLostTriggeredRef.current = true;
+                  s.phase = "lost";
+                  if (onRaidLost) {
+                    const timeoutId = setTimeout(() => {
+                      onRaidLost();
+                      winLostTimeoutsRef.current = winLostTimeoutsRef.current.filter(id => id !== timeoutId);
+                    }, 1500);
+                    winLostTimeoutsRef.current.push(timeoutId);
+                  }
+                  setPhase("lost");
+                }
+              }
+            }
+            p.dead = true;
+            return;
+          }
+        }
 
         const hit = s.enemies.find(en => !en.dead && Math.abs(en.x - p.x) < 10 && Math.abs(en.y - p.y) < 20);
         if (hit) {
@@ -336,6 +553,26 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
             s.scrap += hit.reward;
             setScrap(s.scrap);
             if (onScrapChange) onScrapChange(hit.reward);
+          }
+        }
+      });
+
+      s.enemies.forEach(en => {
+        if (!en.dead && s.bunker && s.bunker.hp > 0 && !en.flying) {
+          const dist = Math.abs(en.x - s.bunker.x);
+          if (dist < 25) {
+            en.attackCooldown--;
+            if (en.attackCooldown <= 0) {
+              s.bunker.hp -= en.damage;
+              en.attackCooldown = 60;
+              if (s.bunker.hp <= 0) {
+                s.bunker.hp = 0;
+                if (!bunkerDestroyedTriggeredRef.current && onBunkerDestroyed) {
+                  bunkerDestroyedTriggeredRef.current = true;
+                  onBunkerDestroyed();
+                }
+              }
+            }
           }
         }
       });
@@ -356,7 +593,13 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
           if (onScrapChange) onScrapChange(bonus);
           if (s.waveIdx >= s.totalWaves - 1) {
             s.phase = "won";
-            if (onRaidWon) setTimeout(onRaidWon, 2000);
+            if (onRaidWon) {
+              const timeoutId = setTimeout(() => {
+                onRaidWon();
+                winLostTimeoutsRef.current = winLostTimeoutsRef.current.filter(id => id !== timeoutId);
+              }, 2000);
+              winLostTimeoutsRef.current.push(timeoutId);
+            }
             setPhase("won");
             showMessage(`RAID REPELLED — +${bonus} SCRAP SALVAGED`, 3000);
           } else {
@@ -438,6 +681,65 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
         });
       }
 
+      // ── Flying enemies ──
+      s.enemies.filter(en => en.flying).forEach(en => {
+        const x = en.x;
+        const y = en.y;
+        const hpr = en.hp / en.maxHp;
+
+        if (en.type === "drone") {
+          ctx.save();
+          ctx.translate(x, y - 10);
+          ctx.rotate(Math.sin((s.tick + en.id) * 0.15) * 0.2);
+          ctx.fillStyle = en.color;
+          ctx.beginPath();
+          ctx.moveTo(0, -6);
+          ctx.lineTo(6, 0);
+          ctx.lineTo(0, 6);
+          ctx.lineTo(-6, 0);
+          ctx.closePath();
+          ctx.fill();
+          ctx.strokeStyle = "#ffaa66";
+          ctx.beginPath();
+          ctx.moveTo(-9, 0);
+          ctx.lineTo(9, 0);
+          ctx.stroke();
+          ctx.fillStyle = "#ff2222";
+          ctx.beginPath();
+          ctx.arc(0, -4, 1.5, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        } else if (en.type === "gunship") {
+          ctx.fillStyle = en.color;
+          ctx.beginPath();
+          ctx.moveTo(x - 14, y - 10);
+          ctx.lineTo(x + 10, y - 10);
+          ctx.lineTo(x + 16, y - 4);
+          ctx.lineTo(x + 10, y + 4);
+          ctx.lineTo(x - 14, y + 4);
+          ctx.lineTo(x - 18, y - 2);
+          ctx.closePath();
+          ctx.fill();
+          ctx.fillStyle = "#ee8844";
+          ctx.beginPath();
+          ctx.arc(x - 12, y - 3, 2.5, 0, Math.PI * 2);
+          ctx.arc(x - 12, y + 1, 2.5, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = "#772200";
+          ctx.beginPath();
+          ctx.moveTo(x - 2, y - 8);
+          ctx.lineTo(x - 18, y - 14);
+          ctx.moveTo(x - 2, y + 2);
+          ctx.lineTo(x - 18, y + 8);
+          ctx.stroke();
+        }
+
+        ctx.fillStyle = "#300";
+        ctx.fillRect(x - 10, y - 22, 20, 3);
+        ctx.fillStyle = en.type === "gunship" ? "#cc5500" : "#ff6600";
+        ctx.fillRect(x - 10, y - 22, 20 * hpr, 3);
+      });
+
       // ── Defenses ──
       s.defenses.forEach(d => {
         const x = d.x, y = d.y;
@@ -486,8 +788,45 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
         ctx.fillRect(x - 12, y - d.height - 8, 24 * hpr, 3);
       });
 
-      // ── Enemies ──
-      s.enemies.forEach(en => {
+      // ── Bunker ──
+      if (s.bunker) {
+        const bk = s.bunker;
+        const hpr = bk.maxHp > 0 ? bk.hp / bk.maxHp : 0;
+        ctx.fillStyle = bk.hp > 0 ? "#2a2a2a" : "#1a1210";
+        ctx.fillRect(bk.x - 20, GROUND_Y - 20, 40, 20);
+
+        if (bk.hp > 0) {
+          ctx.fillStyle = "#8b7355";
+          [-12, 0, 12].forEach(ox => {
+            ctx.beginPath();
+            ctx.ellipse(bk.x + ox, GROUND_Y - 20, 9, 6, 0, 0, Math.PI * 2);
+            ctx.fill();
+          });
+          for (let i = 0; i < bk.slots; i++) {
+            const px = bk.x - 15 + (i * (30 / Math.max(bk.slots, 1)));
+            ctx.fillStyle = "#111";
+            ctx.fillRect(px, GROUND_Y - 14, 6, 4);
+            if (bk.fireCooldown < 3) {
+              ctx.fillStyle = "#ffcc0088";
+              ctx.beginPath();
+              ctx.arc(px + 3, GROUND_Y - 12, 5, 0, Math.PI * 2);
+              ctx.fill();
+            }
+          }
+        }
+
+        ctx.fillStyle = "#300";
+        ctx.fillRect(bk.x - 25, GROUND_Y - 32, 50, 4);
+        ctx.fillStyle = hpr > 0.5 ? "#ffcc00" : "#ff4400";
+        ctx.fillRect(bk.x - 25, GROUND_Y - 32, 50 * hpr, 4);
+        ctx.fillStyle = "#ffcc0088";
+        ctx.font = "7px monospace";
+        ctx.textAlign = "center";
+        ctx.fillText(`SENTRY ×${bk.slots}`, bk.x, GROUND_Y - 36);
+      }
+
+      // ── Ground enemies ──
+      s.enemies.filter(en => !en.flying).forEach(en => {
         const x = en.x, y = en.y;
         // Silhouette human figure
         ctx.fillStyle = "#000000";
@@ -519,15 +858,14 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
       // ── Projectiles ──
       s.projectiles.forEach(p => {
         ctx.beginPath();
-        ctx.arc(p.x, p.y, p.vx > 3 ? 2 : 3, 0, Math.PI * 2);
+        ctx.arc(p.x, p.y, p.splash ? 4 : (p.vx > 3 ? 2 : 3), 0, Math.PI * 2);
         ctx.fillStyle = p.color;
         ctx.fill();
-        // Trail
         ctx.beginPath();
         ctx.moveTo(p.x, p.y);
         ctx.lineTo(p.x - p.vx * 3, p.y - p.vy * 3);
         ctx.strokeStyle = `${p.color}66`;
-        ctx.lineWidth = 1.5;
+        ctx.lineWidth = p.splash ? 2.5 : 1.5;
         ctx.stroke();
       });
 
@@ -549,7 +887,7 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
 
     rafRef.current = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(rafRef.current);
-  }, []);
+  }, [active]);
 
   const resetGame = (size) => {
     const s = stateRef.current;
@@ -687,19 +1025,6 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
             borderRadius: 2,
           }}>
             ▶ SEND WAVE {waveIdx + 1}
-          </button>
-        )}
-        {(phase === "won" || phase === "lost") && (
-          <button onClick={resetGame} style={{
-            fontFamily: "monospace", fontSize: 9, letterSpacing: 2,
-            padding: "5px 16px",
-            background: "rgba(74,179,244,0.1)",
-            border: "1px solid #4ab3f4",
-            color: "#4ab3f4",
-            cursor: "pointer",
-            borderRadius: 2,
-          }}>
-            ↺ RESTART
           </button>
         )}
         {phase === "combat" && (

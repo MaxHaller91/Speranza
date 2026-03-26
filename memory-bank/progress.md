@@ -86,25 +86,19 @@ The memorial side panel is accessible without the memorial building being built.
 ### Game Over Screen — Colonist Levels Incorrect
 Colonist levels are not displaying correctly on the game over screen.
 
-### Surface Defense UI — Frame Sizing
-The "Surface — Arc Controlled Zone" frame is approximately 100px too wide on each side. It should match the width of the colony grid below it exactly.
-
-### Surface Defense — Dev Testing Artifacts
-The raid size selector (Small / Medium / Large buttons) is hardcoded and visible in the minigame UI. This was a testing artifact and must be removed — raid size should be determined exclusively by the `raidWindow.sizeIdx` value passed in from Speranza's heat/raid calculations.
-
 ### Surface Defense — Incomplete Integration with Main Raid System
-The surface defense minigame (`surface_defense.jsx`) is not fully integrated with Speranza's raid lifecycle. Three confirmed bugs from bug report tick-306:
-1. Main tick loop raid strike logic runs in parallel while `surfaceDefenseActive: true` — colonists can be killed/injured by the background raid system while the player is in the minigame. Fix: wrap the tick loop's colonist strike/casualty section with `if (!surfaceDefenseActive)`.
-2. Raid toast notification fires twice in the same tick when a raid launches — likely no deduplication guard on the announcement.
-3. Colonists with `raidFled` cause are added to `memorial[]` but NOT removed from `colonists[]` — the fled colonist becomes a ghost who still exists in the roster as idle. Fix: ensure the flee handler splices the colonist from the colonists array after pushing to memorial.
+The surface defense minigame (`surface_defense.jsx`) is not fully integrated with Speranza's raid lifecycle. Remaining confirmed issue from bug report tick-306:
+1. Raid toast notification fires twice in the same tick when a raid launches — likely no deduplication guard on the announcement.
 
 Do not touch this system without reading `systemPatterns.md` (Heat → Raid Pipeline section) and understanding the full `activeRaid` / `surfaceDefenseActive` / `raidWindow` state handoff first.
 
-### Newly Discovered (Codebase Audit — 2026-03-01)
+### Surface Defense UI — Frame Sizing
+The "Surface — Arc Controlled Zone" frame is approximately 100px too wide on each side. It should match the width of the colony grid below it exactly.
+
+### Step 5 Deferred Pending Building Upgrades
+The new-defense step in `Raid Improvements/STEP_5_new_defenses.md` is intentionally deferred until the colony has a real building-upgrade system. Do not implement Flak/EMP upgrade gating with placeholder `roomLevel`/`armoryLevel` fields.
 
 #### Surface Defense Lifecycle Safety
-- `onRaidLost` callback can be scheduled multiple times after hatch HP reaches 0, causing duplicate parent-side resolution effects.
-- `surface_defense.jsx` has timeout lifecycle gaps (`showMessage`, delayed raid won/lost callbacks) that are not centrally tracked/cleared.
 - RAF loop continues to run while inactive, creating background CPU churn.
 
 #### Worker/Status Consistency (Main Loop + Handlers)
@@ -138,11 +132,41 @@ Do not touch this system without reading `systemPatterns.md` (Heat → Raid Pipe
 - [x] `Raid Improvements/STEP_3_sentry_bunker.md` updated to distinguish colony-side ownership (`Speranza.jsx`) from minigame ownership (`surface_defense.jsx`)
 - [x] `Raid Improvements/STEP_4_wealth_scaling.md` updated so pure wealth helpers belong in `gameData.js` and raid integration stays in `Speranza.jsx`
 - [x] `Raid Improvements/STEP_5_new_defenses.md` updated to avoid assuming nonexistent armory upgrade fields and to keep unlock logic conservative
+- [x] Added `Raid Improvements/STEP_4B_raid_cadence_and_prep_flow.md` to capture the next raid cadence / prep-flow fix pass
+
+### Step 1 Implementation
+- [x] Deferred Step 5 until a real building-upgrade system exists
+- [x] Removed the fled-colonist ghost bug in `Speranza.jsx`
+- [x] Removed the visible RESTART button from `surface_defense.jsx`
+- [x] Added duplicate `onRaidLost` guard in `surface_defense.jsx`
+- [x] Added timeout tracking/cleanup for delayed raid-resolution and message timers in `surface_defense.jsx`
+- [x] Confirmed the underground-strike suppression guard was already present in live `Speranza.jsx`
+- [x] Confirmed the raid-size debug selector was already absent in live `surface_defense.jsx`
+
+### Step 2 Implementation
+- [x] Added flying enemy types (`drone`, `gunship`) to `surface_defense.jsx`
+- [x] Added flying-unit wave generation rules for medium/large raids
+- [x] Added drone approach / burst / retreat / loop behavior
+- [x] Added gunship rocket splash attacks against defenses
+- [x] Added flying-unit rendering and turret air-damage penalty
+
+### Step 3 Implementation
+- [x] Derived `sentryWorkers` in `Speranza.jsx`
+- [x] Passed `sentryWorkers` and `onBunkerDestroyed` into `SurfaceDefense`
+- [x] Added bunker state, auto-fire, rendering, and destruction handling in `surface_defense.jsx`
+- [x] Bunker destruction now injures colony sentry workers in `Speranza.jsx`
+
+### Step 4 Implementation
+- [x] Added pure wealth helpers `calcColonyWealth()` and `getWealthBracket()` to `gameData.js`
+- [x] Replaced heat-only raid size selection with wealth-bracket-based severity in `Speranza.jsx`
+- [x] Added `pendingWealthBracket` state and passed it into `SurfaceDefense`
+- [x] Added minigame wave-density scaling based on wealth bracket
 
 ### Notes
 - Verified that `onSentry` exists in live `Speranza.jsx`, so Step 3 may reference it — but docs now instruct future work to re-check live code first rather than assuming.
 - Verified that `surfaceDefenseActiveRef` and `pendingRaidSize` already exist in live `Speranza.jsx`.
 - Verified that no `roomLevel`/`armoryLevel` references currently exist in `src/`, so Step 5 docs now explicitly warn against assuming those fields are already present.
+- `npm run build` passed after implementing Steps 1–4.
 
 ### Visual
 - [ ] Sprites for all room types
