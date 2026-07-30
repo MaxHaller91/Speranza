@@ -1,5 +1,46 @@
 # Active Context
 
+## Branch: `opus-5` (branched from `testing`) — 2026-07-30
+
+Work in progress on gameplay depth and presentation. Four things landed:
+
+**1. Colonist→room assignment is now the single source of truth.**
+`cell.workers` used to be a standalone number with no link to *which* colonist
+was in a room, so every removal path picked a random staffed room. Colonists now
+own `assignedRoom`; `cell.workers` is a derived mirror maintained by a reconciler
+effect. **Never write `cell.workers` directly** — set the colonist's
+`assignedRoom` and let `pruneInvalidAssignments` / `reconcileGridWorkers` follow.
+Colonists also have `previousRoom`, so they return to their post after shelter,
+injury, expedition, or excavation.
+
+**2. Animated colonist sprites** (`components/ColonistLayer.jsx`).
+Canvas overlay with its own RAF loop — deliberately NOT React state, since
+sprites move at 60fps while the sim ticks every 4s. `pointerEvents:"none"` so
+grid clicks still work; hover is hit-tested against the shared `mousePos`.
+The depth column doubles as the vertical access shaft. Dev sprite sheet at
+`/Speranza/sprites.html` (excluded from the production build).
+
+**3. Heat/raid rebalance.** Sentries mitigate a *percentage* of heat gain
+(18% each, 60% cap) instead of a flat -5/tick that made one Sentry Post switch
+raids off permanently. Raids roll every 8 ticks, not once at midnight. Post-raid
+heat relief is proportional (35%), so heat cycles instead of pinning at max.
+
+**4. Starvation is a process, not a cliff.** Empty stores start a clock —
+warning, collapses at 6 ticks, deaths at 16 — and the run ends at zero
+population. `FlowPanel` shows time-to-empty; `CrisisBanner` escalates.
+
+### Rule learned the hard way: no side effects inside state updaters
+`main.jsx` renders under `StrictMode`, which double-invokes updaters in dev.
+The raid roll (`Math.random`, `setRaidWindow`, `addLog`, `addToast`) was inside a
+`setHeat` updater, so it ran twice per tick — that was the long-standing
+"raid toast fires twice" bug, misattributed to a missing dedupe guard. The
+game-over check was inside a `setRes` updater for the same reason. Both moved out.
+
+### Still open on this branch
+- Base defense minigame depth (one verb: place a tower; difficulty cliff in `generateWave`)
+- Expeditions have zero player input after launch
+- `RAID_SIZES` is still duplicated between `gameData.js` and `surface_defense.jsx`
+
 ## Current Status
 The codebase is in a **stable, build-passing state** after implementing DN-001 save/load foundations.
 
