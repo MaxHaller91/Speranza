@@ -35,6 +35,8 @@ import {
   weightedTargetPick, initColonists, initGrid, INIT_RES,
   STATUS_COLOR, STATUS_LABEL, tickToDayHour, checkMilestoneTrigger,
   earthTexture,
+  reconcileGridWorkers, pruneInvalidAssignments, postStatusFor, isOnPost,
+  occupiedSeats, reclaimPost,
 } from "./gameData.js";
 import SurfaceDefense from './surface_defense';
 import SkyBackground   from './components/SkyBackground.jsx';
@@ -202,6 +204,16 @@ export default function Speranza() {
   useEffect(() => { heatSuppressedTicksRef.current = heatSuppressedTicks; }, [heatSuppressedTicks]);
   // Raid cooldown — starts at 48 (one in-game day) to block raids on fresh game
   const raidCooldownTicksRef = useRef(48);
+
+  // ── Assignment reconciler ────────────────────────────────────────────────
+  // Single source of truth: a colonist's `assignedRoom` decides staffing, and
+  // `cell.workers` is only ever a mirror of it. Nothing else may write workers.
+  // Both helpers return their input reference when there is nothing to change,
+  // so setState bails out and this converges in at most two passes.
+  useEffect(() => {
+    setColonists(prev => pruneInvalidAssignments(prev, gridRef.current));
+    setGrid(prev => reconcileGridWorkers(prev, colonistsRef.current));
+  }, [colonists, grid]);
 
   // ── Auto-open help modal on first play ──────────────────────────────────
   useEffect(() => {
@@ -1072,18 +1084,8 @@ export default function Speranza() {
           } else {
             pushEventTrace("raid_strike_fired", null, "hit");
             targets.forEach(target => {
-              setGrid(prev => {
-                const ng = prev.map(row => row.map(c => ({ ...c })));
-                const staffed = [];
-                ng.forEach((row, r) => row.forEach((cell, c) => {
-                  if (cell.type && cell.workers > 0) staffed.push({ r, c });
-                }));
-                if (staffed.length > 0) {
-                  const room = staffed[Math.floor(Math.random() * staffed.length)];
-                  ng[room.r][room.c].workers = Math.max(0, ng[room.r][room.c].workers - 1);
-                }
-                return ng;
-              });
+              // The target leaves their post — whichever room that actually is.
+              // The reconciler drops the worker count for that exact cell.
               const roll = Math.random();
               // HARDENED: injury window shrinks from 30% to 20% (0.50–0.70 instead of 0.50–0.80)
               const injureThreshold = target.traits?.includes("hardened") ? 0.70 : 0.80;
@@ -1099,21 +1101,26 @@ export default function Speranza() {
                   addLog(`💢 ${sizeDef.icon} ARC STRIKE — ${target.name} barely made it out.`);
                   changeMoraleRef.current(-2, "close call");
                 } else {
-                  setColonists(prev => prev.filter(c => c.id !== target.id));
-                  addToMemorialRef.current(target, "raidFled", tickRef.current);
+                  // Fleeing means abandoning the post, NOT dying. They go idle
+                  // and their room loses its worker via the reconciler — the old
+                  // "delete the colonist" behaviour existed only to paper over
+                  // the worker-count desync, which the reconciler now prevents.
+                  setColonists(prev => prev.map(c => c.id === target.id
+                    ? { ...c, status: "idle", assignedRoom: null } : c
+                  ));
                   pushEventTrace("colonist_fled", target.name, null);
                   addLog(`💢 ${sizeDef.icon} ARC STRIKE — ${target.name} fled their post!`);
-                  addToast(`💢 ${sizeDef.label} STRIKE\n${target.name} fled — shaken but alive.`, "raid", { debugTag: `colonist_fled_${target.name}` });
+                  addToast(`💢 ${sizeDef.label} STRIKE\n${target.name} fled their post — shaken but alive.\nReassign them when it's safe.`, "raid", { debugTag: `colonist_fled_${target.name}` });
                   changeMoraleRef.current(-5, "colonist fled");
                 }
               } else if (roll < injureThreshold) {
                 // steadyHands: injury → flee instead
                 if (isSteadyHands) {
-                  setColonists(prev => prev.map(c => c.id === target.id ? { ...c, status: "idle" } : c));
+                  setColonists(prev => prev.map(c => c.id === target.id ? { ...c, status: "idle", assignedRoom: null } : c));
                   addLog(`💢 ${sizeDef.icon} ARC STRIKE — ${target.name} retreated (steady hands).`);
                   changeMoraleRef.current(-3, "retreat");
                 } else {
-                  setColonists(prev => prev.map(c => c.id === target.id ? { ...c, status: "injured", injuryTicksLeft: INJURY_TICKS_BASE, injuryCount: (c.injuryCount ?? 0) + 1 } : c));
+                  setColonists(prev => prev.map(c => c.id === target.id ? { ...c, status: "injured", assignedRoom: null, injuryTicksLeft: INJURY_TICKS_BASE, injuryCount: (c.injuryCount ?? 0) + 1 } : c));
                   pushEventTrace("colonist_injured", target.name, null);
                   addLog(`💢 ${sizeDef.icon} ARC STRIKE — ${target.name} was INJURED!`);
                   addToast(`💢 ${sizeDef.label} STRIKE — CASUALTY\n${target.name} is injured.`, "injury", { debugTag: `colonist_injured_${target.name}` });
@@ -1123,7 +1130,7 @@ export default function Speranza() {
               } else {
                 // steadyHands: kill → injury instead
                 if (isSteadyHands) {
-                  setColonists(prev => prev.map(c => c.id === target.id ? { ...c, status: "injured", injuryTicksLeft: INJURY_TICKS_BASE, injuryCount: (c.injuryCount ?? 0) + 1 } : c));
+                  setColonists(prev => prev.map(c => c.id === target.id ? { ...c, status: "injured", assignedRoom: null, injuryTicksLeft: INJURY_TICKS_BASE, injuryCount: (c.injuryCount ?? 0) + 1 } : c));
                   pushEventTrace("colonist_injured", target.name, "steadyHands_saved");
                   addLog(`💢 ${sizeDef.icon} ARC STRIKE — ${target.name} badly wounded (steady hands saved them).`);
                   addToast(`💢 ${sizeDef.label} STRIKE\n${target.name} severely injured — but alive.`, "injury", { debugTag: `colonist_injured_${target.name}` });
@@ -1331,10 +1338,14 @@ export default function Speranza() {
             setColonists(p => [...p, newCol]);
             addLog(`🧍 Surface survivor found — ${newCol.name} joined the colony!`);
           }
-          setColonists(p => p.map(c => updated.colonistIds.includes(c.id)
-            ? { ...c, status: "idle", expeditionsCompleted: (c.expeditionsCompleted ?? 0) + 1 }
-            : c
-          ));
+          setColonists(p => {
+            const seats = occupiedSeats(p);
+            return p.map(c => {
+              if (!updated.colonistIds.includes(c.id)) return c;
+              const { room, ...patch } = reclaimPost(c, gridRef.current, seats);
+              return { ...c, ...patch, expeditionsCompleted: (c.expeditionsCompleted ?? 0) + 1 };
+            });
+          });
           const hasGoodLoot = (loot.scrap || 0) > 0 || (loot.salvage || 0) > 0 || (loot.arcTech || 0) > 0;
           addLog(`✅ Expedition returned. ${hasGoodLoot ? `+${loot.scrap || 0} scrap${loot.salvage ? ` · +${loot.salvage} salvage` : ""}${loot.arcTech ? ` · +${loot.arcTech} arcTech` : ""}` : "Empty-handed."}`);
           addToast(`✅ EXPEDITION COMPLETE\n${hasGoodLoot ? "Resources recovered." : "They came back empty-handed."}`, hasGoodLoot ? "success" : "info");
@@ -1362,6 +1373,9 @@ export default function Speranza() {
 
       setColonists(prev => {
         let nurseCapacity = nursesAvailable * 3; // each nurse handles up to 3 patients
+        // Seats already taken, so a recovering colonist only reclaims their old
+        // post if it still exists and nobody filled in for them.
+        const seats = occupiedSeats(prev);
         return prev.map(col => {
           if (col.status !== "injured") return col;
           // IRON LUNGS: heals 2× faster
@@ -1372,10 +1386,16 @@ export default function Speranza() {
           if (col.quirk?.id === "insomniac")   healRate *= 0.85;
           const newTicks = (col.injuryTicksLeft ?? INJURY_TICKS_BASE) - healRate;
           if (newTicks <= 0) {
-            addLog(`💊 ${col.name} has recovered and returned to duty.`);
-            addToast(`💊 RECOVERED\n${col.name} is back on their feet.`, "success");
+            const { room, ...patch } = reclaimPost(col, g, seats);
             playSuccess();
-      return { ...col, status: "idle", injuryTicksLeft: 0 };
+            if (room) {
+              addLog(`💊 ${col.name} has recovered and returned to the ${room.label}.`);
+              addToast(`💊 RECOVERED\n${col.name} is back at their post.`, "success");
+            } else {
+              addLog(`💊 ${col.name} has recovered and is awaiting assignment.`);
+              addToast(`💊 RECOVERED\n${col.name} is back on their feet — reassign them.`, "success");
+            }
+            return { ...col, ...patch, injuryTicksLeft: 0 };
           }
           return { ...col, injuryTicksLeft: newTicks };
         });
@@ -1404,19 +1424,8 @@ export default function Speranza() {
             if (working.length === 0) return prev;
             const refuser = working[Math.floor(Math.random() * working.length)];
             addLog(`😤 ${refuser.name} refused their post — morale is strained.`);
-            setGrid(prevGrid => {
-              const ng = prevGrid.map(row => row.map(c => ({ ...c })));
-              const staffed = [];
-              ng.forEach((row, ri) => row.forEach((cell, ci) => {
-                if (cell.type && cell.workers > 0) staffed.push({ r: ri, c: ci });
-              }));
-              if (staffed.length > 0) {
-                const room = staffed[Math.floor(Math.random() * staffed.length)];
-                ng[room.r][room.c].workers = Math.max(0, ng[room.r][room.c].workers - 1);
-              }
-              return ng;
-            });
-            return prev.map(c => c.id === refuser.id ? { ...c, status: "idle" } : c);
+            // They walk off their own post; the reconciler updates that cell.
+            return prev.map(c => c.id === refuser.id ? { ...c, status: "idle", assignedRoom: null } : c);
           });
         }
       }
@@ -1472,8 +1481,15 @@ export default function Speranza() {
         if (newTicksLeft <= 0) {
           // Unlock the row
           setUnlockedRows(prev => prev.includes(rowIndex) ? prev : [...prev, rowIndex]);
-          // Free excavating colonists back to idle
-          setColonists(prev => prev.map(c => c.status === "excavating" ? { ...c, status: "idle" } : c));
+          // Diggers head back to whatever post they left
+          setColonists(prev => {
+            const seats = occupiedSeats(prev);
+            return prev.map(c => {
+              if (c.status !== "excavating") return c;
+              const { room, ...patch } = reclaimPost(c, gridRef.current, seats);
+              return { ...c, ...patch };
+            });
+          });
           // Discovery event
           const def = EXCAVATION_DEFS[rowIndex];
           if (def) {
@@ -1673,7 +1689,10 @@ export default function Speranza() {
     const picked = idle.slice(0, actualCount);
     const totalTicks = Math.ceil(def.ticks * (def.workers / actualCount));
     setRes(prev => ({ ...prev, scrap: prev.scrap - def.scrap }));
-    setColonists(prev => prev.map(c => picked.find(p => p.id === c.id) ? { ...c, status: "excavating" } : c));
+    setColonists(prev => prev.map(c => picked.find(p => p.id === c.id)
+      ? { ...c, status: "excavating", previousRoom: c.assignedRoom ?? c.previousRoom ?? null, assignedRoom: null }
+      : c
+    ));
     setExcavations(prev => ({ ...prev, [rowIndex]: { workersAssigned: actualCount, ticksLeft: totalTicks, totalTicks } }));
     addLog(`⛏ Excavation of ${def.label} begun. ${actualCount} worker(s) assigned.`);
   };
@@ -1720,33 +1739,30 @@ export default function Speranza() {
     if (def.special === "barracks") return;
 
     if (delta > 0) {
-      // Assign: find first idle colonist (not injured)
       const idle = colonists.filter(co => co.status === "idle");
       if (idle.length === 0) { addLog("⚠ No free colonists available"); return; }
       if (cell.workers >= def.cap) { addLog("⚠ Room is at capacity"); return; }
       const pick = idle[0];
-      const newStatus = cell.type === "sentryPost" ? "onSentry" : "working";
-      setColonists(prev => prev.map(co => co.id === pick.id ? { ...co, status: newStatus } : co));
-      setGrid(prev => {
-        const next = prev.map(row => row.map(c => ({ ...c })));
-        next[r][c].workers += 1;
-        return next;
-      });
+      const newStatus = postStatusFor(cell.type);
+      // Post them to this specific cell; the reconciler updates cell.workers.
+      setColonists(prev => prev.map(co => co.id === pick.id
+        ? { ...co, status: newStatus, assignedRoom: { r, c }, previousRoom: { r, c } }
+        : co
+      ));
       addLog(`👤 ${pick.name} assigned to ${def.label}`);
       playAssign();
     } else {
-      // Unassign: find a colonist with the right status for this room
-      if (cell.workers === 0) return;
-      const statusFilter = cell.type === "sentryPost" ? "onSentry" : "working";
-      const available = colonists.filter(co => co.status === statusFilter);
+      // Stand down someone actually posted to THIS cell — not just anyone with
+      // a matching status, which is what used to desync the counts.
+      const available = colonists.filter(co =>
+        isOnPost(co.status) && co.assignedRoom?.r === r && co.assignedRoom?.c === c
+      );
       if (available.length === 0) return;
-      const pick = available[0];
-      setColonists(prev => prev.map(co => co.id === pick.id ? { ...co, status: "idle" } : co));
-      setGrid(prev => {
-        const next = prev.map(row => row.map(c => ({ ...c })));
-        next[r][c].workers = Math.max(0, next[r][c].workers - 1);
-        return next;
-      });
+      const pick = available[available.length - 1]; // last posted, first out
+      setColonists(prev => prev.map(co => co.id === pick.id
+        ? { ...co, status: "idle", assignedRoom: null }
+        : co
+      ));
       addLog(`👤 ${pick.name} stood down from ${def.label}`);
       playUnassign();
     }
@@ -1755,15 +1771,12 @@ export default function Speranza() {
   const handleDemolish = (r, c) => {
     const cell = grid[r][c];
     if (!cell.type) return;
-    // Free all workers assigned to this room
-    let freed = 0;
-    setColonists(prev => {
-      let toFree = cell.workers;
-      return prev.map(co => {
-        if (toFree > 0 && (co.status === "working" || co.status === "onSentry")) { toFree--; freed++; return { ...co, status: "idle" }; }
-        return co;
-      });
-    });
+    // Free exactly the colonists posted to this cell.
+    setColonists(prev => prev.map(co =>
+      co.assignedRoom?.r === r && co.assignedRoom?.c === c
+        ? { ...co, assignedRoom: null, previousRoom: null, status: isOnPost(co.status) ? "idle" : co.status }
+        : co
+    ));
     setRes(prev => ({ ...prev, scrap: Math.min(MAX_RES, prev.scrap + 5) }));
     setGrid(prev => {
       const next = prev.map(row => row.map(c => ({ ...c })));
@@ -1919,7 +1932,9 @@ export default function Speranza() {
       quirkBonuses:    { surfaceBorn: hasSurfaceBorn, packRat: hasPackRat, loudmouth: hasLoudmouth },
     };
     setColonists(prev =>
-      prev.map(c => picked.find(p => p.id === c.id) ? { ...c, status: "onExpedition" } : c)
+      prev.map(c => picked.find(p => p.id === c.id)
+        ? { ...c, status: "onExpedition", previousRoom: c.assignedRoom ?? c.previousRoom ?? null, assignedRoom: null }
+        : c)
     );
     setHeat(t => clamp(t + (heatSuppressedTicksRef.current > 0 ? 0 : def.threatDelta), 0, HEAT_MAX));
     setExpeditions(prev => [...prev, newExp]);
@@ -2002,22 +2017,42 @@ export default function Speranza() {
   };
 
   const handleSoundAlarm = () => {
-    // Shelter idle and working colonists; unassign them from rooms
-    setColonists(prev => prev.map(c =>
-      (c.status === "idle" || c.status === "working") ? { ...c, status: "sheltered" } : c
-    ));
-    setGrid(prev => prev.map(row => row.map(cell => ({ ...cell, workers: 0 }))));
+    // Pull idle + working colonists into shelter, remembering their post so
+    // BACK TO WORK can restore it. Sentries stay on the surface bunker — they
+    // are the crew that fights, and zeroing their room used to leave them in an
+    // impossible state (status onSentry, post unstaffed).
+    setColonists(prev => prev.map(c => {
+      if (c.status !== "idle" && c.status !== "working") return c;
+      return {
+        ...c,
+        status: "sheltered",
+        previousRoom: c.assignedRoom ?? c.previousRoom ?? null,
+        assignedRoom: null,
+      };
+    }));
     addLog("🏠 ALARM SOUNDED — colonists sheltering. Production halted.");
     addToast("🏠 ALARM SOUNDED\nColonists are sheltering.\nThey are immune to Arc strikes.", "info");
     playShelterAlarm();
   };
 
   const handleBackToWork = () => {
-    setColonists(prev => prev.map(c =>
-      c.status === "sheltered" ? { ...c, status: "idle" } : c
-    ));
-    addLog("🏠 All clear — colonists returned to idle. Reassign them to rooms.");
-    addToast("🏠 ALL CLEAR\nColonists returning from shelter.\nReassign them to restore production.", "success");
+    // Send everyone back to the post they left, where it still exists.
+    const g = gridRef.current;
+    const seats = new Map();
+    setColonists(prev => prev.map(c => {
+      if (c.status !== "sheltered") return c;
+      const prevRoom = c.previousRoom;
+      const cell = prevRoom ? g[prevRoom.r]?.[prevRoom.c] : null;
+      const def  = cell?.type ? ROOM_TYPES[cell.type] : null;
+      if (!def || def.cap <= 0) return { ...c, status: "idle", assignedRoom: null };
+      const key  = `${prevRoom.r}-${prevRoom.c}`;
+      const used = seats.get(key) ?? 0;
+      if (used >= def.cap) return { ...c, status: "idle", assignedRoom: null };
+      seats.set(key, used + 1);
+      return { ...c, status: postStatusFor(cell.type), assignedRoom: { ...prevRoom } };
+    }));
+    addLog("🏠 All clear — colonists returning to their posts.");
+    addToast("🏠 ALL CLEAR\nColonists returning to their posts.\nAnyone whose room is gone is now idle.", "success");
   };
 
   const handleRestart = () => {
@@ -2077,7 +2112,8 @@ export default function Speranza() {
 
   const handleBunkerDestroyed = () => {
     setColonists(prev => prev.map(c => c.status === "onSentry"
-      ? { ...c, status: "injured", injuryTicksLeft: INJURY_TICKS_BASE, injuryCount: (c.injuryCount ?? 0) + 1 }
+      ? { ...c, status: "injured", previousRoom: c.assignedRoom ?? c.previousRoom ?? null, assignedRoom: null,
+          injuryTicksLeft: INJURY_TICKS_BASE, injuryCount: (c.injuryCount ?? 0) + 1 }
       : c
     ));
     addLog("💥 Surface bunker destroyed — sentry workers are injured.");

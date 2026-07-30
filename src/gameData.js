@@ -105,6 +105,11 @@ export function resetNameIdx() { nameIdx = 0; }
 export const COLONIST_BASE = () => ({
   xp: 0, level: 0, traits: [], dutyTicks: 0, ticksAlive: 0, pendingTraitPick: false,
   joinTick: 0, expeditionsCompleted: 0, raidsSurvived: 0,
+  // Which room this colonist is posted to, or null. Grid worker counts are
+  // DERIVED from this — see reconcileAssignments(). Never edit cell.workers directly.
+  assignedRoom: null,
+  // Remembers the last post so shelter/injury recovery can send them back.
+  previousRoom: null,
 });
 
 export function makeColonist(joinTick = 0) {
@@ -314,19 +319,115 @@ export function getWealthBracket(wealth) {
   return 3;
 }
 
+// ─── Assignment ↔ Grid Reconciliation ────────────────────────────────────────
+// `cell.workers` is a DERIVED mirror of how many colonists are posted to that
+// cell. Assignment lives on the colonist (`assignedRoom`); this pair of helpers
+// keeps the mirror honest. Both return the input reference unchanged when there
+// is nothing to fix, so they are safe to call from an effect without looping.
+
+const ROOM_KEY = (r, c) => `${r}-${c}`;
+
+/** True when this status means the colonist is actively manning their post. */
+export function isOnPost(status) {
+  return status === "working" || status === "onSentry";
+}
+
+/** Map of "r-c" → number of colonists currently manning that cell. */
+export function computeWorkerCounts(colonists) {
+  const counts = new Map();
+  colonists.forEach(col => {
+    if (!col.assignedRoom || !isOnPost(col.status)) return;
+    const key = ROOM_KEY(col.assignedRoom.r, col.assignedRoom.c);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  });
+  return counts;
+}
+
+/**
+ * Clear assignments that point at a room which no longer exists (demolished,
+ * or over capacity after a rebuild). Returns the same array if all are valid.
+ */
+export function pruneInvalidAssignments(colonists, grid) {
+  const seatsUsed = new Map();
+  let changed = false;
+  const next = colonists.map(col => {
+    if (!col.assignedRoom) return col;
+    const { r, c } = col.assignedRoom;
+    const cell = grid[r]?.[c];
+    const def  = cell?.type ? ROOM_TYPES[cell.type] : null;
+    const key  = ROOM_KEY(r, c);
+    const used = seatsUsed.get(key) ?? 0;
+    const valid = !!def && def.cap > 0 && used < def.cap;
+    if (valid) {
+      if (isOnPost(col.status)) seatsUsed.set(key, used + 1);
+      return col;
+    }
+    changed = true;
+    return {
+      ...col,
+      assignedRoom: null,
+      status: isOnPost(col.status) ? "idle" : col.status,
+    };
+  });
+  return changed ? next : colonists;
+}
+
+/** Rewrite every cell's `workers` to match the colonist assignments. */
+export function reconcileGridWorkers(grid, colonists) {
+  const counts = computeWorkerCounts(colonists);
+  let changed = false;
+  const next = grid.map((row, r) => row.map((cell, c) => {
+    const want = cell.type ? (counts.get(ROOM_KEY(r, c)) ?? 0) : 0;
+    if (cell.workers === want) return cell;
+    changed = true;
+    return { ...cell, workers: want };
+  }));
+  return changed ? next : grid;
+}
+
+/** The status a colonist takes when posted to this room type. */
+export function postStatusFor(roomType) {
+  return roomType === "sentryPost" ? "onSentry" : "working";
+}
+
+/** Map of "r-c" → seats currently filled. Mutate as you hand out more. */
+export function occupiedSeats(colonists) {
+  const seats = new Map();
+  colonists.forEach(col => {
+    if (!col.assignedRoom || !isOnPost(col.status)) return;
+    const key = ROOM_KEY(col.assignedRoom.r, col.assignedRoom.c);
+    seats.set(key, (seats.get(key) ?? 0) + 1);
+  });
+  return seats;
+}
+
+/**
+ * Send a colonist coming off shelter/injury/expedition/excavation back to the
+ * post they left, if that room still exists and still has a free seat.
+ * Claims the seat in `seats` on success. Returns a patch to spread onto the
+ * colonist, plus `room` (the ROOM_TYPES def) so callers can log it.
+ */
+export function reclaimPost(col, grid, seats) {
+  const home = col.previousRoom;
+  const cell = home ? grid[home.r]?.[home.c] : null;
+  const def  = cell?.type ? ROOM_TYPES[cell.type] : null;
+  if (!def || def.cap <= 0) return { status: "idle", assignedRoom: null, room: null };
+  const key = ROOM_KEY(home.r, home.c);
+  if ((seats.get(key) ?? 0) >= def.cap) return { status: "idle", assignedRoom: null, room: null };
+  seats.set(key, (seats.get(key) ?? 0) + 1);
+  return { status: postStatusFor(cell.type), assignedRoom: { ...home }, room: def };
+}
+
 // ─── Row-Based Raid Targeting ─────────────────────────────────────────────────
 export function weightedTargetPick(colonists, grid, sizeDef) {
+  // Surface-adjacent rows are far more exposed than deep ones.
   const rowWeights = [4, 3, 2, 1];
   const weighted = colonists.map(col => {
-    let rowIdx = 0;
-    if (col.status === "idle")           rowIdx = 0;
-    else if (col.status === "onSentry")  rowIdx = 0;
-    else if (col.status === "excavating") rowIdx = 3;
-    else if (col.status === "working") {
-      grid.forEach((row, r) => row.forEach(cell => {
-        if (cell.workers > 0) rowIdx = r;
-      }));
-    }
+    let rowIdx;
+    if (col.status === "excavating")      rowIdx = 3;   // deepest, digging
+    else if (col.status === "onSentry")   rowIdx = 0;   // manning the surface bunker
+    else if (col.assignedRoom)           rowIdx = col.assignedRoom.r;
+    else                                  rowIdx = 1;   // idle in the commons
     let weight = rowWeights[rowIdx] ?? 1;
     if (col.traits?.includes("ghost")) weight *= 0.5;
     return { col, weight };
@@ -353,9 +454,11 @@ export function makeGrid() {
 
 export function initColonists() {
   nameIdx = 0; // reset name counter for fresh colony
+  // The two starters are posted to the Workshop and Power Cell laid down by
+  // initGrid(); their assignedRoom is what makes those cells read as staffed.
   return [
-    { id: "c0", name: nextName(), status: "working", backstory: BACKSTORIES[0], quirk: QUIRKS[0], injuryCount: 0, ...COLONIST_BASE() },
-    { id: "c1", name: nextName(), status: "working", backstory: BACKSTORIES[1], quirk: QUIRKS[1], injuryCount: 0, ...COLONIST_BASE() },
+    { id: "c0", name: nextName(), status: "working", backstory: BACKSTORIES[0], quirk: QUIRKS[0], injuryCount: 0, ...COLONIST_BASE(), assignedRoom: { r: 0, c: 0 } },
+    { id: "c1", name: nextName(), status: "working", backstory: BACKSTORIES[1], quirk: QUIRKS[1], injuryCount: 0, ...COLONIST_BASE(), assignedRoom: { r: 0, c: 1 } },
     { id: "c2", name: nextName(), status: "idle",    backstory: BACKSTORIES[2], quirk: QUIRKS[2], injuryCount: 0, ...COLONIST_BASE() },
   ];
 }
