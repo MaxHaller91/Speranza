@@ -87,10 +87,13 @@ export const INJURY_TICKS_BASE = 40;
 export const HEAL_RATE_NURSE   = 4;
 
 // ─── Raid Sizes ───────────────────────────────────────────────────────────────
+// `waves` is how many waves the surface-defense minigame runs for this size.
+// It lives here so the minigame and the colony agree on one definition —
+// surface_defense.jsx used to keep its own separate RAID_SIZES table.
 export const RAID_SIZES = {
-  small:  { label: "SMALL",  targets: 1, icon: "⚡", duration: 20, strikeEvery: 10 },
-  medium: { label: "MEDIUM", targets: 2, icon: "🔥", duration: 30, strikeEvery: 10 },
-  large:  { label: "LARGE",  targets: 3, icon: "💀", duration: 60, strikeEvery: 10 },
+  small:  { label: "SMALL",  targets: 1, icon: "⚡", duration: 20, strikeEvery: 10, waves: 3 },
+  medium: { label: "MEDIUM", targets: 2, icon: "🔥", duration: 30, strikeEvery: 10, waves: 5 },
+  large:  { label: "LARGE",  targets: 3, icon: "💀", duration: 60, strikeEvery: 10, waves: 8 },
 };
 export const RAID_SIZE_ORDER  = ["small", "medium", "large"];
 export const RAID_LAUNCH_CHANCE = 0.60;

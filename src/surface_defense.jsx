@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { RAID_SIZES as COLONY_RAID_SIZES } from "./gameData.js";
 
 // ─── CONSTANTS ───────────────────────────────────────────────────────────────
 const W = 800;
@@ -17,6 +18,7 @@ const DEFENSE_TYPES = {
     fireRate: 40, // ticks between shots
     color: "#4ab3f4",
     width: 18, height: 32,
+    upgrade: { cost: 35, damage: 8, hp: 30, range: 25, fireRate: -4 },
   },
   barricade: {
     label: "BARRICADE",
@@ -27,6 +29,7 @@ const DEFENSE_TYPES = {
     fireRate: 999,
     color: "#8b7355",
     width: 14, height: 28,
+    upgrade: { cost: 18, damage: 0, hp: 90, range: 0, fireRate: 0 },
   },
   missile: {
     label: "MISSILE",
@@ -37,8 +40,23 @@ const DEFENSE_TYPES = {
     fireRate: 90,
     color: "#e85d04",
     width: 14, height: 40,
+    upgrade: { cost: 55, damage: 22, hp: 20, range: 35, fireRate: -10 },
   },
 };
+
+// Non-building tools. Placement was the only verb the minigame had; these give
+// the player something to do with scrap other than spam new towers, and make a
+// damaged emplacement worth saving instead of writing off.
+const MAX_LEVEL = 2;               // level 0 -> 2, so two upgrades per emplacement
+const SELL_REFUND = 0.5;
+const REPAIR_COST_PER_HP = 0.35;
+
+// Combat-phase ability. Before this, combat was entirely passive — the player
+// placed towers in prep and then watched. One button with real timing is enough
+// to make the fight something you play rather than something you observe.
+const EMP_CHARGES_PER_RAID = 2;
+const EMP_STUN_FRAMES = 150;       // ~2.5s at 60fps
+const EMP_RADIUS = 260;
 
 const ENEMY_TYPES = {
   grunt: { hp: 40, maxHp: 40, speed: 0.5, damage: 8, reward: 10, w: 12, color: "#cc2200" },
@@ -71,32 +89,94 @@ const ENEMY_TYPES = {
 };
 
 
-// Raid sizes: small=3 waves, medium=5 waves, large=8 waves
-const RAID_SIZES = { small: 3, medium: 5, large: 8 };
+// Raid sizes come from gameData so the colony and the minigame can't disagree.
+const RAID_SIZES = Object.fromEntries(
+  Object.entries(COLONY_RAID_SIZES).map(([k, v]) => [k, v.waves])
+);
 
-function generateWave(waveIdx, totalWaves, wealthBracket = 0) {
-  const w = waveIdx;
+// ─── Wave generation ─────────────────────────────────────────────────────────
+// Waves are built by spending a threat budget rather than by an if-ladder of
+// hand-written counts. The old version jumped from 2 grunts on a small raid's
+// first wave to 35+ units with gunships on a large raid's last one — a cliff,
+// not a curve. A budget gives a smooth ramp, keeps every raid size using the
+// same tuning, and makes "how hard is this wave" a single readable number.
+const UNIT_COST = { runner: 7, grunt: 10, drone: 15, heavy: 30, gunship: 65 };
+
+// Budget at the first and last wave of a raid. Everything else interpolates.
+const BUDGET_START = 20;
+const BUDGET_END   = 210;
+
+/** Threat budget for a wave. Exported shape is pure and easy to eyeball. */
+export function waveBudget(waveIdx, totalWaves, wealthBracket = 0) {
+  const progress = totalWaves <= 1 ? 1 : waveIdx / (totalWaves - 1);
+  // Shorter raids don't reach the full ceiling — a 3-wave skirmish should never
+  // hit the same intensity as the last wave of an 8-wave assault.
+  const reach = 0.45 + 0.55 * ((totalWaves - 3) / 5);
+  const base  = BUDGET_START + (BUDGET_END - BUDGET_START) * progress * Math.min(1, reach);
+  return Math.round(base * (1 + wealthBracket * 0.22));
+}
+
+/** Which unit types are available this deep into a raid. */
+function unlockedUnits(waveIdx, totalWaves) {
+  const progress = totalWaves <= 1 ? 1 : waveIdx / (totalWaves - 1);
+  const pool = ["grunt"];
+  if (progress >= 0.20) pool.push("runner");
+  if (progress >= 0.40) pool.push("drone");
+  if (progress >= 0.45) pool.push("heavy");
+  if (progress >= 0.75 && totalWaves >= 8) pool.push("gunship");
+  return pool;
+}
+
+// Share of the budget each type gets, renormalised over whatever is unlocked.
+// Spending greedily from the most expensive unit down instead produced waves of
+// almost pure drones — and since turrets take a 50% penalty against air, those
+// were both the hardest and the most monotonous waves in the game.
+const MIX = { grunt: 0.42, runner: 0.16, drone: 0.18, heavy: 0.24 };
+
+export function generateWave(waveIdx, totalWaves, wealthBracket = 0) {
+  let budget = waveBudget(waveIdx, totalWaves, wealthBracket);
+  const pool = unlockedUnits(waveIdx, totalWaves);
+  const counts = {};
+
+  // Gunships are a set-piece, not a budget line — one shows up to headline the
+  // closing waves of a large raid. Budgeting them made them never appear.
+  if (pool.includes("gunship")) {
+    counts.gunship = 1;
+    budget -= UNIT_COST.gunship;
+  }
+
+  const spendPool = pool.filter(t => t !== "gunship");
+  const totalWeight = spendPool.reduce((s, t) => s + MIX[t], 0);
+  spendPool.forEach(type => {
+    const n = Math.floor((budget * (MIX[type] / totalWeight)) / UNIT_COST[type]);
+    if (n > 0) counts[type] = (counts[type] ?? 0) + n;
+  });
+
+  // Whatever rounding left behind becomes grunts, so the budget is fully used.
+  const spent = Object.entries(counts).reduce((s, [t, n]) => s + n * UNIT_COST[t], 0);
+  const leftover = Math.floor((waveBudget(waveIdx, totalWaves, wealthBracket) - spent) / UNIT_COST.grunt);
+  if (leftover > 0) counts.grunt = (counts.grunt ?? 0) + leftover;
+
+  // Split each type across both approaches; alternate which side leads.
   const groups = [];
-  const intensityMult = 1 + (wealthBracket * 0.25);
-  const gruntCount = Math.max(1, Math.round((2 + Math.floor(w * 1.5)) * intensityMult));
-  groups.push({ type: "grunt", side: "right", count: gruntCount, interval: Math.max(20, 55 - w * 4) });
-  if (w >= 1) groups.push({ type: "grunt", side: "left", count: Math.ceil(gruntCount * 0.6), interval: Math.max(25, 60 - w * 4) });
-  if (w >= 2) groups.push({ type: "runner", side: w % 2 === 0 ? "right" : "left", count: 1 + Math.floor((w - 1) * 0.8), interval: Math.max(18, 40 - w * 3) });
-  if (w >= 3) { const h = Math.floor((w - 2) * 0.6); if (h > 0) groups.push({ type: "heavy", side: "right", count: h, interval: Math.max(60, 100 - w * 5) }); }
-  if (w >= 5) groups.push({ type: "heavy", side: "left", count: 1 + Math.floor((w - 4) * 0.4), interval: 80 });
-  if (w >= 7) {
-    groups.push({ type: "runner", side: "left", count: 3 + Math.floor((w - 6) * 0.5), interval: 15 });
-    groups.push({ type: "runner", side: "right", count: 3 + Math.floor((w - 6) * 0.5), interval: 15 });
-  }
-  if (totalWaves >= 8 && w >= 1) {
-    groups.push({ type: "drone", side: w % 2 === 0 ? "right" : "left", count: 1 + Math.floor(w * 0.5), interval: Math.max(30, 50 - w * 3) });
-  } else if (totalWaves >= 5 && w >= 2) {
-    groups.push({ type: "drone", side: w % 2 === 0 ? "right" : "left", count: 1 + Math.floor((w - 1) * 0.5), interval: Math.max(32, 52 - w * 3) });
-  }
-  if (totalWaves >= 8 && w >= 2 && w % 3 === 2) {
-    groups.push({ type: "gunship", side: w % 2 === 0 ? "left" : "right", count: 1, interval: 180 });
-  }
+  Object.entries(counts).forEach(([type, total], i) => {
+    const leadRight = (waveIdx + i) % 2 === 0;
+    const right = Math.ceil(total / 2);
+    const left  = total - right;
+    // Faster raids arrive in tighter formation.
+    const interval = Math.max(14, Math.round((type === "gunship" ? 170 : type === "heavy" ? 85 : 46) - waveIdx * 3));
+    if (right > 0) groups.push({ type, side: leadRight ? "right" : "left", count: right, interval });
+    if (left  > 0) groups.push({ type, side: leadRight ? "left" : "right", count: left,  interval });
+  });
   return groups;
+}
+
+/** Flat {type: count} for the wave, used by the pre-wave briefing. */
+export function waveComposition(waveIdx, totalWaves, wealthBracket = 0) {
+  const counts = {};
+  generateWave(waveIdx, totalWaves, wealthBracket)
+    .forEach(g => { counts[g.type] = (counts[g.type] ?? 0) + g.count; });
+  return counts;
 }
 
 let eid = 0;
@@ -124,6 +204,7 @@ function makeEnemy(side, type = "grunt") {
     burstRemaining: 0,
     burstTimer: 0,
     attackPhase: "approach",
+    stunned: 0,
     loopTimer: 0,
     splashRadius: def.splashRadius ?? 0,
     rocketSpeed: def.rocketSpeed ?? 5,
@@ -143,8 +224,42 @@ function makeDefense(x, type) {
     fireRate: def.fireRate, fireCooldown: 0,
     color: def.color,
     width: def.width, height: def.height,
+    level: 0,
+    invested: def.cost,   // tracks total scrap in this emplacement, for refunds
     dead: false,
   };
+}
+
+/** Apply one upgrade tier in place. Caller checks cost and level cap. */
+function upgradeDefense(d) {
+  const up = DEFENSE_TYPES[d.type].upgrade;
+  d.level  += 1;
+  d.maxHp  += up.hp;
+  d.hp     += up.hp;
+  d.damage += up.damage;
+  d.range  += up.range;
+  d.fireRate = Math.max(8, d.fireRate + up.fireRate);
+  d.invested += upgradeCost(d.type, d.level - 1);
+}
+
+/** Upgrades get pricier each tier. */
+function upgradeCost(type, currentLevel) {
+  return Math.round(DEFENSE_TYPES[type].upgrade.cost * (1 + currentLevel * 0.6));
+}
+
+function repairCost(d) {
+  return Math.max(1, Math.ceil((d.maxHp - d.hp) * REPAIR_COST_PER_HP));
+}
+
+/** Nearest defense to an x position, within a grab radius. */
+function defenseAt(defenses, x, radius = 26) {
+  let best = null, bestD = radius;
+  defenses.forEach(d => {
+    if (d.dead) return;
+    const dist = Math.abs(d.x - x);
+    if (dist < bestD) { bestD = dist; best = d; }
+  });
+  return best;
 }
 
 function makeProjectile(sx, sy, tx, ty, damage, color) {
@@ -194,6 +309,7 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
   const [waveIdx, setWaveIdx] = useState(0);
   const [raidSize, setRaidSize] = useState(initialRaidSize);
   const [message, setMessage] = useState(null);
+  const [empCharges, setEmpCharges] = useState(EMP_CHARGES_PER_RAID);
 
   // Wave label helper
   const getWaveLabel = (idx, total) => {
@@ -221,6 +337,8 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
     tick: 0,
     intermissionTick: 0,
     lastCountdown: 10,
+    empCharges: EMP_CHARGES_PER_RAID,
+    empFlash: 0,
   });
   const rafRef = useRef(null);
   const selectedToolRef = useRef("turret");
@@ -260,6 +378,8 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
     } : null;
     s.spawnQueue = []; s.spawnTimer = 0; s.tick = 0;
     s.intermissionTick = 0; s.lastCountdown = 10;
+    s.empCharges = EMP_CHARGES_PER_RAID; s.empFlash = 0;
+    setEmpCharges(EMP_CHARGES_PER_RAID);
     raidLostTriggeredRef.current = false;
     bunkerDestroyedTriggeredRef.current = false;
     winLostTimeoutsRef.current.forEach(clearTimeout);
@@ -311,20 +431,69 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
     const x = (e.clientX - rect.left) * scaleX;
 
     const tool = selectedToolRef.current;
+    const spend = (n) => { s.scrap -= n; setScrap(s.scrap); if (onScrapChange) onScrapChange(-n); };
+    const refund = (n) => { s.scrap += n; setScrap(s.scrap); if (onScrapChange) onScrapChange(n); };
+
+    // ── Maintenance tools act on an existing emplacement ──
+    if (tool === "repair" || tool === "sell" || tool === "upgrade") {
+      const d = defenseAt(s.defenses, x);
+      if (!d) { showMessage("NOTHING THERE"); return; }
+
+      if (tool === "sell") {
+        refund(Math.round(d.invested * SELL_REFUND));
+        d.dead = true;
+        showMessage(`SOLD — +${Math.round(d.invested * SELL_REFUND)} SCRAP`);
+        return;
+      }
+      if (tool === "repair") {
+        if (d.hp >= d.maxHp) { showMessage("ALREADY INTACT"); return; }
+        const cost = repairCost(d);
+        if (s.scrap < cost) { showMessage("NOT ENOUGH SCRAP"); return; }
+        spend(cost);
+        d.hp = d.maxHp;
+        showMessage(`REPAIRED — -${cost} SCRAP`);
+        return;
+      }
+      // upgrade
+      if (d.level >= MAX_LEVEL) { showMessage("MAX LEVEL"); return; }
+      const cost = upgradeCost(d.type, d.level);
+      if (s.scrap < cost) { showMessage("NOT ENOUGH SCRAP"); return; }
+      spend(cost);
+      upgradeDefense(d);
+      showMessage(`UPGRADED TO Lv${d.level} — -${cost} SCRAP`);
+      return;
+    }
+
+    // ── Build tools place a new emplacement ──
     const def = DEFENSE_TYPES[tool];
-
+    if (!def) return;
     if (s.scrap < def.cost) { showMessage("NOT ENOUGH SCRAP"); return; }
-
     // Don't place on hatch
     if (Math.abs(x - HATCH_X) < HATCH_W) { showMessage("HATCH BLOCKED"); return; }
     // Don't stack
-    const tooClose = s.defenses.some(d => Math.abs(d.x - x) < 30);
+    const tooClose = s.defenses.some(d => !d.dead && Math.abs(d.x - x) < 30);
     if (tooClose) { showMessage("TOO CLOSE"); return; }
 
     s.defenses.push(makeDefense(x, tool));
-    s.scrap -= def.cost;
-    setScrap(s.scrap);
-    if (onScrapChange) onScrapChange(-def.cost);
+    spend(def.cost);
+  }, [onScrapChange]);
+
+  /** Combat ability: stun every ground unit near the hatch. */
+  const fireEmp = useCallback(() => {
+    const s = stateRef.current;
+    if (s.phase !== "combat") { showMessage("ONLY DURING COMBAT"); return; }
+    if (s.empCharges <= 0) { showMessage("NO EMP CHARGES"); return; }
+    s.empCharges -= 1;
+    setEmpCharges(s.empCharges);
+    s.empFlash = 18;
+    let hit = 0;
+    s.enemies.forEach(en => {
+      if (en.dead || en.flying) return;           // ground units only
+      if (Math.abs(en.x - HATCH_X) > EMP_RADIUS) return;
+      en.stunned = EMP_STUN_FRAMES;
+      hit++;
+    });
+    showMessage(hit > 0 ? `EMP BURST — ${hit} UNIT${hit > 1 ? "S" : ""} STUNNED` : "EMP BURST — NOTHING IN RANGE");
   }, []);
 
   // ─── GAME LOOP ─────────────────────────────────────────────────────────────
@@ -380,8 +549,13 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
       }
 
       // ── ENEMIES move + attack ──
+      if (s.empFlash > 0) s.empFlash--;
+
       s.enemies.forEach(en => {
         if (en.dead) return;
+
+        // EMP'd units hold still — they can still be shot, which is the point.
+        if (en.stunned > 0) { en.stunned--; return; }
 
         // Check if blocked by barricade or other enemy
         const blocking = !en.flying && s.defenses.find(d =>
@@ -590,6 +764,7 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
       });
 
       s.enemies.forEach(en => {
+        if (!en.dead && en.stunned > 0) return;   // stunned units can't hit the bunker
         if (!en.dead && s.bunker && s.bunker.hp > 0 && !en.flying) {
           const dist = Math.abs(en.x - s.bunker.x);
           if (dist < 25) {
@@ -821,6 +996,19 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
         ctx.fillRect(x - 12, y - d.height - 8, 24, 3);
         ctx.fillStyle = hpr > 0.5 ? "#22cc44" : "#cc4400";
         ctx.fillRect(x - 12, y - d.height - 8, 24 * hpr, 3);
+
+        // Upgrade pips, so the player can read investment at a glance.
+        for (let i = 0; i < d.level; i++) {
+          ctx.fillStyle = "#ffcc33";
+          ctx.fillRect(x - 10 + i * 5, y - d.height - 13, 3.5, 3.5);
+        }
+        // Flag anything worth repairing during a build phase.
+        if ((s.phase === "prep" || s.phase === "intermission") && d.hp < d.maxHp) {
+          ctx.fillStyle = "#ff8800";
+          ctx.font = "bold 8px monospace";
+          ctx.textAlign = "center";
+          ctx.fillText("🔧", x, y - d.height - 17);
+        }
       });
 
       // ── Bunker ──
@@ -888,7 +1076,29 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
         ctx.fillRect(x - 10, y - 42, 20, 3);
         ctx.fillStyle = "#cc2200";
         ctx.fillRect(x - 10, y - 42, 20 * hpr, 3);
+
+        // Stunned marker — crackling arcs over the head.
+        if (en.stunned > 0) {
+          ctx.strokeStyle = `rgba(120,200,255,${0.5 + 0.5 * Math.sin(s.tick * 0.6)})`;
+          ctx.lineWidth = 1.2;
+          ctx.beginPath();
+          ctx.moveTo(x - 6, y - 46);
+          ctx.lineTo(x - 2, y - 41);
+          ctx.lineTo(x + 2, y - 46);
+          ctx.lineTo(x + 6, y - 41);
+          ctx.stroke();
+        }
       });
+
+      // EMP shockwave
+      if (s.empFlash > 0) {
+        const t = 1 - s.empFlash / 18;
+        ctx.strokeStyle = `rgba(120,200,255,${1 - t})`;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(HATCH_X, GROUND_Y - 6, EMP_RADIUS * t, 0, Math.PI * 2);
+        ctx.stroke();
+      }
 
       // ── Projectiles ──
       s.projectiles.forEach(p => {
@@ -1032,20 +1242,52 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
 
         <div style={{ width: 1, height: 20, background: "#222" }} />
 
-        {/* Defense picker */}
-        {phase === "prep" && Object.entries(DEFENSE_TYPES).map(([key, def]) => (
-          <button key={key} onClick={() => setSelectedTool(key)} style={{
-            fontFamily: "monospace", fontSize: 8, letterSpacing: 1,
-            padding: "4px 8px",
-            background: selectedTool === key ? `${def.color}22` : "rgba(255,255,255,0.03)",
-            border: `1px solid ${selectedTool === key ? def.color : "#222"}`,
-            color: selectedTool === key ? def.color : "#445",
-            cursor: "pointer",
+        {/* Build + maintenance tools — available in prep AND between waves, so
+            a wave you barely survived can be patched up before the next one. */}
+        {(phase === "prep" || phase === "intermission") && <>
+          {Object.entries(DEFENSE_TYPES).map(([key, def]) => (
+            <button key={key} onClick={() => setSelectedTool(key)} style={{
+              fontFamily: "monospace", fontSize: 8, letterSpacing: 1,
+              padding: "4px 8px",
+              background: selectedTool === key ? `${def.color}22` : "rgba(255,255,255,0.03)",
+              border: `1px solid ${selectedTool === key ? def.color : "#222"}`,
+              color: selectedTool === key ? def.color : "#445",
+              cursor: "pointer",
+              borderRadius: 2,
+            }}>
+              {def.label} ({def.cost}⚙)
+            </button>
+          ))}
+          {[
+            { key: "upgrade", label: "▲ UPGRADE", color: "#ffcc33" },
+            { key: "repair",  label: "🔧 REPAIR",  color: "#22cc66" },
+            { key: "sell",    label: "✕ SELL",     color: "#aa5544" },
+          ].map(t => (
+            <button key={t.key} onClick={() => setSelectedTool(t.key)} style={{
+              fontFamily: "monospace", fontSize: 8, letterSpacing: 1,
+              padding: "4px 8px",
+              background: selectedTool === t.key ? `${t.color}22` : "rgba(255,255,255,0.03)",
+              border: `1px solid ${selectedTool === t.key ? t.color : "#222"}`,
+              color: selectedTool === t.key ? t.color : "#445",
+              cursor: "pointer", borderRadius: 2,
+            }}>{t.label}</button>
+          ))}
+        </>}
+
+        {/* Combat ability — the only thing the player can do mid-fight. */}
+        {phase === "combat" && (
+          <button onClick={fireEmp} disabled={empCharges <= 0} style={{
+            fontFamily: "monospace", fontSize: 9, letterSpacing: 1,
+            padding: "4px 10px",
+            background: empCharges > 0 ? "rgba(80,180,255,0.14)" : "rgba(255,255,255,0.02)",
+            border: `1px solid ${empCharges > 0 ? "#4ab3f4" : "#222"}`,
+            color: empCharges > 0 ? "#7fd0ff" : "#334",
+            cursor: empCharges > 0 ? "pointer" : "not-allowed",
             borderRadius: 2,
           }}>
-            {def.label} ({def.cost}⚙)
+            ⚡ EMP BURST ({empCharges})
           </button>
-        ))}
+        )}
 
         <div style={{ flex: 1 }} />
 
@@ -1076,12 +1318,33 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
 
       </div>
 
-      {/* Instructions */}
+      {/* Wave briefing + instructions */}
       <div style={{ width: W, padding: "6px 12px", background: "#050403", border: "1px solid #111", borderTop: "none" }}>
+        {(phase === "prep" || phase === "intermission") && (() => {
+          // Telegraph the incoming wave so placement is a decision, not a guess.
+          const comp = waveComposition(waveIdx, stateRef.current.totalWaves, stateRef.current.wealthBracket);
+          const ICONS = { grunt: "🚶", runner: "🏃", heavy: "🛡", drone: "🛸", gunship: "🚁" };
+          const air = (comp.drone ?? 0) + (comp.gunship ?? 0);
+          return (
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4, flexWrap: "wrap" }}>
+              <span style={{ color: "#8a6a2a", fontSize: 8, letterSpacing: 1 }}>INCOMING WAVE {waveIdx + 1}:</span>
+              {Object.entries(comp).map(([type, n]) => (
+                <span key={type} style={{ color: type === "gunship" ? "#ff5522" : type === "heavy" ? "#cc6644" : "#7a8a9a", fontSize: 9, fontFamily: "monospace" }}>
+                  {ICONS[type] ?? "•"} {n}× {type}
+                </span>
+              ))}
+              {air > 0 && (
+                <span style={{ color: "#ff8844", fontSize: 8, letterSpacing: 1 }}>
+                  ⚠ {air} AIR — turrets do half damage
+                </span>
+              )}
+            </div>
+          );
+        })()}
         <div style={{ color: "#223", fontSize: 8, letterSpacing: 1 }}>
           {(phase === "prep" || phase === "intermission")
-            ? "CLICK SURFACE TO PLACE DEFENSES · TURRETS AUTO-FIRE · BARRICADES BLOCK · MISSILES LONG RANGE"
-            : phase === "combat" ? "DEFEND THE HATCH · EARN SCRAP FROM KILLS"
+            ? "CLICK TO BUILD · UPGRADE / REPAIR / SELL EXISTING EMPLACEMENTS · TURRETS AUTO-FIRE · MISSILES LONG RANGE"
+            : phase === "combat" ? "DEFEND THE HATCH · EARN SCRAP FROM KILLS · EMP BURST STUNS GROUND UNITS"
             : phase === "won" ? "ALL THREATS NEUTRALIZED — COLONY SECURE"
             : "HATCH BREACHED — COLONY TAKING RAID DAMAGE"}
         </div>

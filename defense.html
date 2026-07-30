@@ -1,0 +1,24 @@
+<!doctype html>
+<!--
+  Dev-only harness for the surface defense minigame, so it can be exercised
+  without waiting for a raid to fire in a real colony. Not part of the build.
+  Open at: /Speranza/defense.html
+-->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Speranza — surface defense harness</title>
+    <style>
+      body { margin: 0; background: #0b0f16; color: #8899aa;
+             font: 11px 'Courier New', monospace; padding: 10px; }
+      .row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
+      button.h { font: 10px monospace; padding: 4px 10px; background: #10161f;
+                 border: 1px solid #2a3a4a; color: #8ab; cursor: pointer; }
+      button.h.on { border-color: #4ab3f4; color: #4ab3f4; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/defensePreview.jsx"></script>
+  </body>
+</html>
