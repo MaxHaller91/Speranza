@@ -494,9 +494,10 @@ export default function Speranza() {
       !!gameOver ||
       !!activeDilemma ||
       buildMenuOpen ||
-      !!milestoneToast ||
-      journalOpen ||
-      effectsOpen;
+      !!milestoneToast;
+    // The colony log and effects panels are READ-ONLY side panels. They used to
+    // pause the game indefinitely with no visible cause — open the log to check
+    // what happened and your colony silently stops.
 
     if (popupActive) {
       if (!forcedPauseByOverlayRef.current && timescale !== 0) {
@@ -508,7 +509,7 @@ export default function Speranza() {
       forcedPauseByOverlayRef.current = false;
       setTimescale(timescaleBeforeToastRef.current || 1);
     }
-  }, [buildMenu, selected, grid, colonists, gameOver, activeDilemma, milestoneToast, toasts.length, journalOpen, effectsOpen, timescale]);
+  }, [buildMenu, selected, grid, colonists, gameOver, activeDilemma, milestoneToast, toasts.length, timescale]);
 
   const changeMorale = useCallback((delta, reason) => {
     setMorale(prev => clamp(prev + delta, -100, 100));
@@ -596,6 +597,10 @@ export default function Speranza() {
       }
 
       case "survivor": {
+        if (colonistsRef.current.length >= calcPopCap(gridRef.current)) {
+          addLog("🧍 A survivor was found topside — but there is nowhere to put them.");
+          break;
+        }
         const newCol = makeColonist(tickRef.current);
         setColonists(p => [...p, newCol]);
         addLog(`🧍 Surface survivor found — ${newCol.name} joined the colony!`);
@@ -644,7 +649,11 @@ export default function Speranza() {
     for (const m of MILESTONES) {
       if (firedMilestonesRef.current.includes(m.id)) continue;
       if (checkMilestoneTrigger(m.trigger, snap)) {
-        setFiredMilestones(prev => [...prev, m.id]);
+        // Sync the ref here, not via the effect. checkMilestones runs from the
+        // tick loop AND from raid-end; two calls in one tick both read a stale
+        // ref and fire the same milestone twice.
+        firedMilestonesRef.current = [...firedMilestonesRef.current, m.id];
+        setFiredMilestones(prev => prev.includes(m.id) ? prev : [...prev, m.id]);
         setMilestoneToast({ title: m.title, text: m.text });
         changeMoraleRef.current(5, `milestone: ${m.title}`);
         addHistoryRef.current("⭐", m.title);
@@ -1116,7 +1125,7 @@ export default function Speranza() {
             const from = pool.length ? pool : cols;
             const victim = from[Math.floor(Math.random() * from.length)];
             setColonists(prev => prev.filter(c => c.id !== victim.id));
-            addToMemorialRef.current(victim, "moraleDeath", tickRef.current);
+            addToMemorialRef.current(victim, noFood ? "starved" : "thirst", tickRef.current);
             pushEventTrace("deprivation_death", victim.name, lack);
             addLog(`💀 ${victim.name} died of ${noFood ? "starvation" : "thirst"}.`);
             addToast(`💀 ${victim.name} DIED\nOf ${noFood ? "starvation" : "thirst"}.`, "raid", { debugTag: `deprivation_death_${victim.name}` });
@@ -1989,7 +1998,14 @@ export default function Speranza() {
     // counting once that finishes — but the timer is set from the same table.
     raidCooldownTicksRef.current = raidCooldownFor(lostSize);
     unduckMusic();
+    playRaid();
+    setRaidFlash(true);
+    setTimeout(() => setRaidFlash(false), 900);
     addLog("⚠ Surface defenses breached — Arc forces entering colony.");
+    addToast(`💥 HATCH BREACHED
+You lost the surface. Arc forces are inside.
+${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelter your people.`,
+      "raid", { key: `surface-loss-${tickRef.current}` });
   };
 
   const handleRecruit = () => {
@@ -2135,8 +2151,14 @@ export default function Speranza() {
     if (a.heatDelta)    outcomeBits.push(`Heat ${a.heatDelta > 0 ? "+" : ""}${a.heatDelta}`);
     if (a.suppressHeatTicks) setHeatSuppressedTicks(a.suppressHeatTicks);
     if (a.suppressHeatTicks) outcomeBits.push(`Heat suppressed ${a.suppressHeatTicks}t`);
-    if (a.recruitFree)  setColonists(p => [...p, makeColonist(tickRef.current)]);
-    if (a.recruitFree)  outcomeBits.push("1 colonist joined");
+    if (a.recruitFree) {
+      if (colonistsRef.current.length >= popCap) {
+        outcomeBits.push("no room for them — turned away");
+      } else {
+        setColonists(p => [...p, makeColonist(tickRef.current)]);
+        outcomeBits.push("1 colonist joined");
+      }
+    }
     // Pick targets outside the updaters — rolling inside means StrictMode picks
     // a different victim on the second pass and the memorial entry desyncs from
     // who actually died.

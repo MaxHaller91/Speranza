@@ -58,6 +58,18 @@ const EMP_CHARGES_PER_RAID = 2;
 const EMP_STUN_FRAMES = 150;       // ~2.5s at 60fps
 const EMP_RADIUS = 260;
 
+// The minigame's scrap used to BE colony scrap — every kill reward and wave
+// bonus was forwarded straight into the colony treasury. A medium raid paid out
+// ~685 scrap (7 worker-days of Workshop output) and a large one ~1289, whether
+// you won or lost, which made raids the most profitable activity in the game.
+//
+// Now the colony commits a fixed DEFENSE BUDGET up front. Kills and wave
+// bonuses refill that budget only, so the "kills fund more turrets" loop inside
+// the raid survives intact, and the colony gets a bounded salvage payout per
+// wave actually cleared. A clean win is roughly cost-neutral; a loss is not.
+const DEFENSE_BUDGET = { small: 90, medium: 140, large: 200 };
+const SALVAGE_PER_WAVE_CLEARED = 25;
+
 const ENEMY_TYPES = {
   grunt: { hp: 40, maxHp: 40, speed: 0.5, damage: 8, reward: 10, w: 12, color: "#cc2200" },
   heavy: { hp: 120, maxHp: 120, speed: 0.25, damage: 20, reward: 25, w: 18, color: "#880000" },
@@ -343,6 +355,7 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
   const rafRef = useRef(null);
   const selectedToolRef = useRef("turret");
   const bunkerDestroyedTriggeredRef = useRef(false);
+  const budgetCommittedRef = useRef(false);
 
   // sync selectedTool to ref
   useEffect(() => { selectedToolRef.current = selectedTool; }, [selectedTool]);
@@ -358,12 +371,13 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
 
   // Reset ONLY when active transitions to true, not on every scrap change
   useEffect(() => {
-    if (!active) return;
+    // Raid over — allow the next one to draw a fresh budget.
+    if (!active) { budgetCommittedRef.current = false; return; }
     const startScrap    = initialScrapRef.current;
     const startRaidSize = initialRaidSizeRef.current;
     const s = stateRef.current;
     s.enemies = []; s.defenses = []; s.projectiles = [];
-    s.scrap = startScrap; s.hatchHp = 100; s.phase = "prep";
+    s.hatchHp = 100; s.phase = "prep";
     s.waveIdx = 0; s.totalWaves = RAID_SIZES[startRaidSize] ?? 5;
     s.wealthBracket = wealthBracket;
     s.bunker = sentryWorkers > 0 ? {
@@ -380,11 +394,19 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
     s.intermissionTick = 0; s.lastCountdown = 10;
     s.empCharges = EMP_CHARGES_PER_RAID; s.empFlash = 0;
     setEmpCharges(EMP_CHARGES_PER_RAID);
+    // Draw the budget from colony scrap exactly once per raid.
+    const committed = Math.round(Math.min(startScrap, DEFENSE_BUDGET[startRaidSize] ?? 140));
+    s.scrap = committed;
+    if (!budgetCommittedRef.current) {
+      budgetCommittedRef.current = true;
+      if (onScrapChange) onScrapChange(-committed);
+    }
+    setScrap(committed);
     raidLostTriggeredRef.current = false;
     bunkerDestroyedTriggeredRef.current = false;
     winLostTimeoutsRef.current.forEach(clearTimeout);
     winLostTimeoutsRef.current = [];
-    setScrap(startScrap); setHatchHp(100); setPhase("prep");
+    setHatchHp(100); setPhase("prep");
     setWaveIdx(0); setMessage(null); setRaidSize(startRaidSize);
   }, [active, wealthBracket, sentryWorkers]);
 
@@ -431,8 +453,9 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
     const x = (e.clientX - rect.left) * scaleX;
 
     const tool = selectedToolRef.current;
-    const spend = (n) => { s.scrap -= n; setScrap(s.scrap); if (onScrapChange) onScrapChange(-n); };
-    const refund = (n) => { s.scrap += n; setScrap(s.scrap); if (onScrapChange) onScrapChange(n); };
+    // Budget-internal only — the colony already paid its commitment up front.
+    const spend  = (n) => { s.scrap -= n; setScrap(s.scrap); };
+    const refund = (n) => { s.scrap += n; setScrap(s.scrap); };
 
     // ── Maintenance tools act on an existing emplacement ──
     if (tool === "repair" || tool === "sell" || tool === "upgrade") {
@@ -656,6 +679,8 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
             if (s.hatchHp <= 0 && !raidLostTriggeredRef.current) {
               raidLostTriggeredRef.current = true;
               s.phase = "lost";
+              // Partial salvage — you only recover from waves you actually held.
+              if (onScrapChange) onScrapChange(SALVAGE_PER_WAVE_CLEARED * s.waveIdx);
               if (onRaidLost) {
                 const timeoutId = setTimeout(() => {
                   onRaidLost();
@@ -758,7 +783,6 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
             hit.dead = true;
             s.scrap += hit.reward;
             setScrap(s.scrap);
-            if (onScrapChange) onScrapChange(hit.reward);
           }
         }
       });
@@ -797,9 +821,10 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
           const bonus = Math.round(20 + (s.hatchHp / 100) * 40);
           s.scrap += bonus;
           setScrap(s.scrap);
-          if (onScrapChange) onScrapChange(bonus);
           if (s.waveIdx >= s.totalWaves - 1) {
             s.phase = "won";
+            const salvage = SALVAGE_PER_WAVE_CLEARED * s.totalWaves;
+            if (onScrapChange) onScrapChange(salvage);
             if (onRaidWon) {
               const timeoutId = setTimeout(() => {
                 onRaidWon();
@@ -1217,7 +1242,7 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
       }}>
         {/* Scrap */}
         <div style={{ color: "#a855f7", fontSize: 10, letterSpacing: 1, minWidth: 80 }}>
-          🔧 SCRAP: {scrap}
+          🔧 BUDGET: {Math.round(scrap)}
         </div>
 
         {/* Hatch HP */}

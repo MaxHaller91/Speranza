@@ -3,6 +3,15 @@
 import { ROOM_TYPES, EXPEDITION_TYPES, T2_TECHS, TRAITS, STATUS_COLOR, STATUS_LABEL, tickToDayHour } from "../gameData.js";
 import { SURFACE_LOCATIONS } from "../../speranza-lore.js";
 
+export const CAUSE_LABEL = {
+  raidKilled: "Killed in raid",
+  expeditionKilled: "Killed on expedition",
+  raidFled: "Fled during raid",
+  starved: "Starved",
+  thirst: "Died of thirst",
+  moraleDeath: "Left the colony",
+};
+
 const RISK_COLOR = {
   LOW: "#7ed321", MEDIUM: "#e8d44d", HIGH: "#ff8800",
   EXTREME: "#ff4444", UNKNOWN: "#bb44ff",
@@ -453,7 +462,7 @@ export default function SidePanel({
                     <span style={{ color: "#555", fontSize: 7 }}>LVL {entry.level}</span>
                   </div>
                   <div style={{ color: "#c87a30", fontSize: 7, letterSpacing: 0.5, marginBottom: 3 }}>
-                    {entry.cause === "raidKilled" ? "Killed in raid" : entry.cause === "expeditionKilled" ? "Killed on expedition" : entry.cause === "raidFled" ? "Fled during raid" : "Left the colony"}
+                    {CAUSE_LABEL[entry.cause] ?? "Left the colony"}
                     {" — "}DAY {entry.day} · {entry.hour}
                   </div>
                   <div style={{ color: "#445", fontSize: 7, fontStyle: "italic", lineHeight: 1.5 }}>{entry.epitaph}</div>

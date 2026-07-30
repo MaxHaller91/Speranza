@@ -60,8 +60,11 @@ function applyMusicVolume() {
 function applySfxVolume() {
   if (!sfxMasterGain) return;
   const ctx = sfxMasterGain.context;
-  // Keep SFX volume fixed; music slider only controls background music.
-  sfxMasterGain.gain.setValueAtTime(muted ? 0 : DEFAULT_MASTER_VOLUME, ctx.currentTime);
+  // The slider is the ONE volume control: it governs music AND effects, and 0
+  // means silent. SFX used to be pinned at a fixed level regardless of it, so
+  // dragging to 0% silenced the music but left alert dings at full volume with
+  // no way to stop them.
+  sfxMasterGain.gain.setValueAtTime(muted ? 0 : masterVolume, ctx.currentTime);
 }
 
 function sfxOut(ctx) {
@@ -71,7 +74,8 @@ function sfxOut(ctx) {
 // SFX cooldown — prevents stacking at high timescale
 let sfxCooldown = false;
 function sfxGuard(fn) {
-  if (muted || sfxCooldown) return;
+  // Silent means silent — don't even schedule the nodes.
+  if (muted || masterVolume <= 0 || sfxCooldown) return;
   sfxCooldown = true;
   fn();
   setTimeout(() => { sfxCooldown = false; }, 150);
@@ -130,6 +134,7 @@ export function setMusicVolume(val) {
   masterVolume = clamp01(val);
   saveMasterVolume(masterVolume);
   applyMusicVolume();
+  applySfxVolume();
 }
 
 export function getMusicVolume() {

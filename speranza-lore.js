@@ -1286,6 +1286,18 @@ export const EPITAPHS = {
     "The fear got them in the end.",
     "Decided the odds weren't worth it.",
   ],
+  starved: [
+    "Gave their ration away twice. Didn't mention it.",
+    "Went quiet somewhere around the fourth day without food.",
+    "Kept working. That was the problem.",
+    "There was nothing left to give them.",
+  ],
+  thirst: [
+    "The recyclers stopped. So did they.",
+    "Held out longer than anyone expected.",
+    "Asked whether the others had drunk first.",
+    "We ran dry before we ran out of time.",
+  ],
   moraleDeath: [
     "The colony couldn't hold them here anymore.",
     "Left when the lights went out in people's eyes.",

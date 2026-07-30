@@ -66,6 +66,40 @@
 - [x] DN-001 save/load foundations implemented (autosave ring, header controls, export/import, raid-safe load normalization)
 - [x] Mid-raid save gating implemented (save/load/export/import/delete disabled during volatile raid states)
 
+## Playtest Bug Pass — 2026-07-30 (opus-5)
+
+Found by playing the game to Day 8 with an automated anomaly observer, plus a
+follow-up player report. All fixed:
+
+- **Starvation deaths displayed as "left"** — deprivation deaths were tagged
+  `moraleDeath`, which fell through to the memorial's generic "Left the colony".
+  Now `starved` / `thirst` with their own epitaph pools and labels.
+- **Milestones could fire twice** — the guard read `firedMilestonesRef`, which
+  only syncs via an effect. `checkMilestones` is called from the tick loop AND
+  raid-end, so two calls in one tick both saw a stale ref. Ref now updates
+  synchronously at the point of firing.
+- **Population cap bypass** — expedition survivors and dilemma `recruitFree`
+  both added colonists without checking `popCap` (only the RECRUIT button did).
+  Observed 6/5. Both now check.
+- **Colony Log paused the game indefinitely** — `journalOpen` / `effectsOpen`
+  were in the overlay-pause set, so opening a read-only side panel froze the
+  colony with no visible cause. Removed; they no longer pause.
+- **Losing a raid was indistinguishable from winning** — the minigame simply
+  vanished and scrap went UP. Now flashes, sounds, and posts an explicit
+  breach toast naming how many ticks of strikes are incoming.
+- **Raid economy was broken** — every kill reward and wave bonus was forwarded
+  into colony scrap, paying ~685 (medium) / ~1289 (large) whether you won or
+  lost. Raids were the most profitable activity in the game. The minigame now
+  runs on a committed DEFENSE BUDGET; the colony pays up front and receives a
+  bounded salvage per wave cleared. Clean win ~ -15 scrap, loss ~ -90.
+- **`SCRAP: 212.99999999999994`** — raw float in the minigame header, now rounded
+  and relabelled BUDGET.
+- **Volume slider did not affect sound effects** — `applySfxVolume()` pinned SFX
+  to a constant with the comment "music slider only controls background music",
+  and the old mute button no longer exists in the UI. Setting 0% silenced music
+  but left alert dings at full volume with no way to stop them. The slider now
+  governs music and SFX, and 0 means silent.
+
 ## Known Issues / Limitations ⚠️
 
 ### Save System Validation Pending

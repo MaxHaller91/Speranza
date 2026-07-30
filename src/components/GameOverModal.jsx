@@ -66,6 +66,8 @@ export default function GameOverModal({ colonyName, gameOver, historyLog, onRest
                     {entry.cause === "raidKilled"        ? "killed in raid"
                    : entry.cause === "expeditionKilled" ? "lost topside"
                    : entry.cause === "raidFled"         ? "fled"
+                   : entry.cause === "starved"          ? "starved"
+                   : entry.cause === "thirst"           ? "died of thirst"
                    : "left"}
                   </span>
                 </div>
