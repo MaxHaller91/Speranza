@@ -2,7 +2,7 @@
 // Props: grid, unlockedRows, excavations, selected, hoveredCell, mousePos, gridMetrics,
 //        colonists, hoveredColonist, onCellClick, onStartExcavation, onAssign,
 //        onSetHoveredCell, onHoverColonist
-import { ROOM_TYPES, EXCAVATION_DEFS, earthTexture } from "../gameData.js";
+import { ROOM_TYPES, EXCAVATION_DEFS, earthTexture, calcAdjacency } from "../gameData.js";
 import ColonistLayer from "./ColonistLayer.jsx";
 
 export default function ColonyGrid({
@@ -111,6 +111,20 @@ export default function ColonyGrid({
                             ))}
                           </div>
                         )}
+                        {/* Adjacency — the reason column placement matters */}
+                        {(() => {
+                          const adj = calcAdjacency(grid, r, c);
+                          if (adj.notes.length === 0) return null;
+                          return (
+                            <div style={{ marginTop: 4, paddingTop: 4, borderTop: "1px solid #1a2030" }}>
+                              {adj.notes.map((n, i) => (
+                                <div key={i} style={{ color: n.good ? "#7ed321" : "#ff7755", fontSize: 7.5, lineHeight: 1.5 }}>
+                                  {n.good ? "▲" : "▼"} {n.text}
+                                </div>
+                              ))}
+                            </div>
+                          );
+                        })()}
                         {grid[r][c].damaged && <div style={{ color: "#ff8800", fontSize: 8, marginTop: 3 }}>⚠ DAMAGED — repair: 20 scrap</div>}
                         {def.special === "hospital"   && grid[r][c].workers > 0 && <div style={{ color: "#ff6b9d", fontSize: 8, marginTop: 2 }}>Treating up to {grid[r][c].workers * 3} patients</div>}
                         {def.special === "sentryPost" && <div style={{ color: "#e8d44d", fontSize: 8, marginTop: 2 }}>-{Math.min(60, grid[r][c].workers * 18)}% heat gain</div>}

@@ -1,7 +1,7 @@
 // GameOverModal.jsx — game over / colony collapse screen
 // Props: gameOver, historyLog, onRestart
 
-export default function GameOverModal({ gameOver, historyLog, onRestart }) {
+export default function GameOverModal({ colonyName, gameOver, historyLog, onRestart }) {
   if (!gameOver) return null;
 
   const days = gameOver.daysAlive ?? 1;
@@ -29,7 +29,7 @@ export default function GameOverModal({ gameOver, historyLog, onRestart }) {
           <div style={{ fontSize: 28, fontWeight: "bold", color: gradeColor, letterSpacing: 4, marginBottom: 4 }}>
             {grade}
           </div>
-          <div style={{ fontSize: 10, color: "#445566", letterSpacing: 2 }}>COLONY DESIGNATION: SPERANZA</div>
+          <div style={{ fontSize: 10, color: "#445566", letterSpacing: 2 }}>COLONY DESIGNATION: {colonyName ?? "SPERANZA"}</div>
         </div>
 
         {/* Reason */}

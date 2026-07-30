@@ -24,6 +24,7 @@ function ResBar({ k, icon, label, color, res }) {
 }
 
 export default function ColonyHeader({
+  colonyName, onRenameColony,
   tick, timescale, musicVolume, res, surfaceHaul, surfaceCondition,
   morale, heat, heatState, heatPct, raidWindow, radioTowerOnline,
   unlockedTechs, totalColonists, popCap, unassigned, grid,
@@ -45,7 +46,15 @@ export default function ColonyHeader({
 
         {/* Title + controls */}
         <div>
-          <div style={{ fontSize: 20, fontWeight: "bold", color: "#4ab3f4", letterSpacing: 3 }}>⛩ SPERANZA</div>
+          {/* Click to rename — the colony is the player's, so let them name it. */}
+          <div
+            title="Click to rename your colony"
+            onClick={() => {
+              const next = window.prompt("Name your colony", colonyName);
+              if (next && next.trim() && onRenameColony) onRenameColony(next.trim().toUpperCase().slice(0, 22));
+            }}
+            style={{ fontSize: 20, fontWeight: "bold", color: "#4ab3f4", letterSpacing: 3, cursor: "pointer" }}
+          >⛩ {colonyName}</div>
           <div style={{ fontSize: 9, color: "#2a4a6a", letterSpacing: 2 }}>UNDERGROUND COLONY · {tickToDayHour(tick)}</div>
           <div style={{ marginTop: 3, display: "inline-flex", alignItems: "center", gap: 5, background: "#0a0c14", border: `1px solid ${surfaceCondition.color}44`, borderRadius: 4, padding: "2px 8px" }}>
             <span style={{ fontSize: 10 }}>{surfaceCondition.icon}</span>

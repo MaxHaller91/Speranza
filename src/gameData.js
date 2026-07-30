@@ -177,26 +177,31 @@ export function makeColonist(joinTick = 0) {
 export const ROOM_TYPES = {
   power: {
     label: "Power Cell",     icon: "⚡", sprite: powerCellSprite, color: "#f5a623", bg: "#1a1200", border: "#f5a623",
+    tag: "power",
     cost: { scrap: 10 },    produces: { energy: 4 }, consumes: {}, cap: 2,
     desc: "Generates energy to power the colony",
   },
   water: {
     label: "Water Recycler", icon: "💧", sprite: waterPumpSprite, color: "#4a90e2", bg: "#00101f", border: "#4a90e2",
+    tag: "lifeSupport",
     cost: { scrap: 15 },    produces: { water: 3 }, consumes: { energy: 1 }, cap: 2,
     desc: "Recycles water, needs energy",
   },
   hydro: {
     label: "Hydroponics",    icon: "🌱", sprite: hydroponicsSprite, color: "#7ed321", bg: "#0a1a00", border: "#7ed321",
+    tag: "lifeSupport",
     cost: { scrap: 20 },    produces: { food: 2 }, consumes: { energy: 1, water: 1 }, cap: 2,
     desc: "Grows food, needs energy + water",
   },
   workshop: {
     label: "Workshop",       icon: "🔧", color: "#bd10e0", bg: "#10001a", border: "#bd10e0",
+    tag: "industry",
     cost: { scrap: 0 },     produces: { scrap: 2 }, consumes: { energy: 1 }, cap: 2,
     desc: "Makes scrap for construction",
   },
   barracks: {
     label: "Barracks",       icon: "🛏", sprite: barracksSprite, color: "#e0b84a", bg: "#1a1200", border: "#e0b84a",
+    tag: "living",
     cost: { scrap: 25 },    produces: {}, consumes: {}, cap: 0,
     popBonus: 2,
     desc: "Houses colonists (+2 pop cap)",
@@ -204,83 +209,194 @@ export const ROOM_TYPES = {
   },
   armory: {
     label: "Armory",         icon: "⚔️", sprite: armorySprite, color: "#ff4444", bg: "#1a0000", border: "#ff4444",
+    tag: "industry",
     cost: { scrap: 40 },    produces: {}, consumes: { energy: 1 }, cap: 5,
     desc: "Enables surface expeditions. Needs 1 armorer assigned.",
     special: "armory",
   },
   hospital: {
     label: "Hospital",       icon: "🏥", sprite: hospitalSprite, color: "#ff6b9d", bg: "#1a0010", border: "#ff6b9d",
+    tag: "care",
     cost: { scrap: 35 },    produces: {}, consumes: { energy: 1 }, cap: 2,
     desc: "Heals injured colonists. 1 nurse treats up to 3 patients. Without nurses, healing is 4× slower.",
     special: "hospital",
   },
   researchLab: {
     label: "Research Lab",   icon: "🔬", color: "#00e5ff", bg: "#001a1f", border: "#00e5ff",
+    tag: "industry",
     cost: { scrap: 45 },    produces: { rp: 1 }, consumes: { energy: 1 }, cap: 2,
     desc: "Generates research points to unlock T2 technologies. Assign researchers to accelerate progress.",
     special: "researchLab",
   },
   sentryPost: {
     label: "Sentry Post",    icon: "🪖", color: "#e8d44d", bg: "#1a1500", border: "#e8d44d",
+    tag: "defense",
     cost: { scrap: 30 },    produces: {}, consumes: {}, cap: 2,
     desc: "Each assigned sentry cuts Arc heat gain by 18%, up to a 60% cap. Sentries man the surface bunker and are exposed during raids.",
     special: "sentryPost", requiresTech: "sentryPost",
   },
   radioTower: {
     label: "Radio Tower",    icon: "📡", color: "#4ab3f4", bg: "#001020", border: "#4ab3f4",
+    tag: "defense",
     cost: { scrap: 40 },    produces: {}, consumes: { energy: 1 }, cap: 0,
     desc: "Reveals incoming raid size when a raid window opens. Without it, raid size is unknown until it strikes.",
     special: "radioTower", requiresTech: "radioTower",
   },
   shelter: {
     label: "Shelter",        icon: "🏠", color: "#7ecfb4", bg: "#001a12", border: "#7ecfb4",
+    tag: "defense",
     cost: { scrap: 50 },    produces: {}, consumes: {}, cap: 0,
     desc: "Sound the alarm to shelter colonists. Sheltered colonists are immune to Arc strikes.",
     special: "shelter", requiresTech: "shelter",
   },
   tavern: {
     label: "Tavern",         icon: "🍺", color: "#d4a843", bg: "#1a1000", border: "#d4a843",
+    tag: "living",
     cost: { scrap: 40 },    produces: {}, consumes: { water: 1, energy: 1 }, cap: 2,
     desc: "Boosts colony morale. Each bartender generates +1.5 morale/tick. Requires water + energy.",
     special: "tavern",
   },
   diningHall: {
     label: "Dining Hall",    icon: "🍽", color: "#e8855a", bg: "#1a0a00", border: "#e8855a",
+    tag: "living",
     cost: { scrap: 35 },    produces: {}, consumes: { food: 2, energy: 1 }, cap: 2,
     desc: "Boosts colony morale. Each cook generates +1.5 morale/tick. Requires food + energy.",
     special: "diningHall",
   },
   arcTurret: {
     label: "Arc Turret",     icon: "🔫", color: "#ff6622", bg: "#1a0800", border: "#ff6622",
+    tag: "defense",
     cost: { scrap: 60, salvage: 8, arcTech: 3 }, produces: {}, consumes: { energy: 2 }, cap: 0,
     desc: "Automated defense. 30% chance per strike to eliminate 1 incoming Arc unit. Drains 2 energy/tick.",
     special: "arcTurret", requiresSchematic: "turretSchematics",
   },
   empArray: {
     label: "EMP Array",      icon: "⚡🔲", color: "#bb44ff", bg: "#10001a", border: "#bb44ff",
+    tag: "defense",
     cost: { scrap: 80, salvage: 10, arcTech: 5 }, produces: {}, consumes: { energy: 3 }, cap: 1,
     desc: "50% to reduce raid by 1 target. Delays next strike +3 ticks. Requires 1 operator.",
     special: "empArray", requiresSchematic: "empSchematics",
   },
   blastDoors: {
     label: "Blast Doors",    icon: "🛡", color: "#aaaaaa", bg: "#111114", border: "#aaaaaa",
+    tag: "defense",
     cost: { scrap: 50, salvage: 6, arcTech: 2 }, produces: {}, consumes: {}, cap: 0,
     desc: "Passive. 40% chance to absorb building damage targeting row 0 per strike.",
     special: "blastDoors", requiresSchematic: "fortSchematics",
   },
   geothermal: {
     label: "Geothermal Gen", icon: "🌋", color: "#ff8800", bg: "#1a0800", border: "#ff8800",
+    tag: "power",
     cost: { scrap: 70, salvage: 12, arcTech: 4 }, produces: { energy: 6 }, consumes: {}, cap: 0,
     desc: "Passive +6 energy/tick. No workers needed. Unlocked by -40m excavation.",
     special: "geothermal", requiresSchematic: "geoSchematics",
   },
   memorial: {
     label: "Memorial Hall",  icon: "🕯", color: "#9988bb", bg: "#0a0814", border: "#9988bb",
+    tag: "care",
     cost: { scrap: 30 },    produces: {}, consumes: {}, cap: 0,
     desc: "A place to grieve. Death morale penalty −40%. Raid morale loss −2/strike.",
     special: "memorial",
   },
 };
+
+// ─── Room Adjacency ───────────────────────────────────────────────────────────
+// Before this, only a room's ROW mattered (raid targeting weights by depth) —
+// columns did nothing at all, so five of every six placement decisions were
+// meaningless and building felt like filling in a form.
+//
+// Rules operate on room TAGS, not on pairs of specific rooms. Four tag rules
+// cover all 18 room types, and any room added later inherits the behaviour for
+// free. A pairwise table would have been ~150 combinations to author and tune.
+//
+// The four rules deliberately pull against each other: cluster life support,
+// but spread power out to touch consumers; keep industry away from the
+// barracks, but pull the hospital toward them. On a 7-wide row that is a real
+// layout problem with no single right answer.
+export const ADJACENCY_RULES = [
+  {
+    id: "plumbing", self: "lifeSupport", other: "lifeSupport",
+    label: "shared plumbing", good: true,
+    outputMult: 0.15,
+    desc: "Life-support rooms side by side share feed lines. +15% output each.",
+  },
+  {
+    id: "gridTap", self: "*consumer", other: "power",
+    label: "direct power tap", good: true,
+    energyDelta: -1,
+    desc: "Sitting next to a generator saves a unit of transmission loss. -1 energy upkeep.",
+  },
+  {
+    id: "noise", self: "industry", other: "living",
+    label: "machine noise", good: false,
+    moraleDelta: -0.4,
+    desc: "Nobody sleeps next to a workshop. -0.4 morale per tick.",
+  },
+  {
+    id: "bedside", self: "care", other: "living",
+    label: "bedside manner", good: true,
+    healMult: 0.25,
+    desc: "Care rooms beside quarters mean shorter trips for the wounded. +25% healing.",
+  },
+];
+
+/** Horizontal neighbours only — the row is the layout puzzle. */
+export function neighboursOf(grid, r, c) {
+  const out = [];
+  [[r, c - 1], [r, c + 1]].forEach(([nr, nc]) => {
+    const cell = grid[nr]?.[nc];
+    if (cell?.type) out.push({ r: nr, c: nc, cell, def: ROOM_TYPES[cell.type] });
+  });
+  return out;
+}
+
+/**
+ * Adjacency effects for one cell. Pure — feed it the grid and a position.
+ * Returns multipliers/deltas plus readable notes for the tooltip.
+ */
+export function calcAdjacency(grid, r, c) {
+  const cell = grid[r]?.[c];
+  const result = { outputMult: 1, energyDelta: 0, moraleDelta: 0, healMult: 1, notes: [] };
+  if (!cell?.type) return result;
+  const def = ROOM_TYPES[cell.type];
+  if (!def) return result;
+
+  const isConsumer = (def.consumes?.energy ?? 0) > 0;
+
+  neighboursOf(grid, r, c).forEach(({ def: nDef }) => {
+    ADJACENCY_RULES.forEach(rule => {
+      const selfMatches = rule.self === "*consumer" ? isConsumer : def.tag === rule.self;
+      // Rules are symmetric: a Hospital beside Barracks and Barracks beside a
+      // Hospital both benefit, so check the pairing in both directions.
+      const forward  = selfMatches && nDef.tag === rule.other;
+      const backward = def.tag === rule.other &&
+        (rule.self === "*consumer" ? (nDef.consumes?.energy ?? 0) > 0 : nDef.tag === rule.self);
+      if (!forward && !backward) return;
+
+      if (rule.outputMult)  result.outputMult += rule.outputMult;
+      if (rule.energyDelta) result.energyDelta += rule.energyDelta;
+      if (rule.moraleDelta) result.moraleDelta += rule.moraleDelta;
+      if (rule.healMult)    result.healMult += rule.healMult;
+      result.notes.push({
+        ruleId: rule.id,
+        good: rule.good,
+        text: `${rule.label} — ${nDef.label}`,
+      });
+    });
+  });
+  return result;
+}
+
+/** Total per-tick morale change from every room's adjacency. */
+export function calcAdjacencyMorale(grid) {
+  let total = 0;
+  grid.forEach((row, r) => row.forEach((cell, c) => {
+    if (!cell.type) return;
+    total += calcAdjacency(grid, r, c).moraleDelta;
+  }));
+  // Each noisy pair is counted from both sides; halve so a pair costs its rule.
+  return total / 2;
+}
 
 // ─── Excavation Definitions ───────────────────────────────────────────────────
 export const EXCAVATION_DEFS = {

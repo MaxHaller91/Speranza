@@ -43,6 +43,7 @@ import {
   earthTexture,
   reconcileGridWorkers, pruneInvalidAssignments, postStatusFor, isOnPost,
   occupiedSeats, reclaimPost, advanceExpeditions,
+  calcAdjacency, calcAdjacencyMorale,
 } from "./gameData.js";
 import SurfaceDefense from './surface_defense';
 import SkyBackground   from './components/SkyBackground.jsx';
@@ -66,6 +67,9 @@ export default function Speranza() {
   const [colonists,  setColonists]  = useState(initColonists); // array of colonist objects
   const [heat,       setHeat]       = useState(0);
   const [expeditions,  setExpeditions]  = useState([]);
+  // The player names their own colony. It is what the game-over screen
+  // mourns, which turns "a colony died" into "KESTREL DEEP died on day 34".
+  const [colonyName, setColonyName] = useState("SPERANZA");
   const [expedDuration, setExpedDuration] = useState(40);
   // Launch draft — the player picks a destination and an exact crew before
   // committing, instead of the game grabbing whoever happened to be idle first.
@@ -309,6 +313,7 @@ export default function Speranza() {
   const buildSaveState = useCallback((source = null) => {
     const s = source ?? {
       tick,
+      colonyName,
       res,
       heat,
       morale,
@@ -340,6 +345,7 @@ export default function Speranza() {
 
     return {
       tick: s.tick,
+      colonyName: s.colonyName,
       res: s.res,
       heat: s.heat,
       morale: s.morale,
@@ -374,7 +380,7 @@ export default function Speranza() {
       timescale: 0,
     };
   }, [
-    tick, res, heat, morale, grid, colonists,
+    tick, colonyName, res, heat, morale, grid, colonists,
     unlockedRows, excavations, expeditions, expedDuration, expedLocationId,
     surfaceHaul, unlockedTechs, memorial,
     raidsRepelled, largeRaidsRepelled, expeditionsCompleted,
@@ -695,6 +701,7 @@ export default function Speranza() {
     if (!state || typeof state !== "object") return false;
     try {
       setGrid(state.grid ?? initGrid());
+      setColonyName(state.colonyName ?? "SPERANZA");
       setRes(state.res ?? INIT_RES);
       setColonists(Array.isArray(state.colonists) ? state.colonists : initColonists());
       setHeat(state.heat ?? 0);
@@ -888,9 +895,13 @@ export default function Speranza() {
         }));
         const moraleDrain    = Math.max(0, totalCol - 7) * 0.3;
         const moraleGain     = moraleWorkers * 1.5;
-        const netMoraleDelta = moraleGain - moraleDrain;
+        // Layout consequences: workshops next to bunks cost morale every tick.
+        const adjMorale      = calcAdjacencyMorale(g);
+        const netMoraleDelta = moraleGain - moraleDrain + adjMorale;
         if (moraleGain > 0) moraleTickBreakdown.plus.push(`Comfort services staffed +${moraleGain.toFixed(1)}`);
         if (moraleDrain > 0) moraleTickBreakdown.minus.push(`Crowding strain -${moraleDrain.toFixed(1)}`);
+        if (adjMorale < 0)   moraleTickBreakdown.minus.push(`Noisy neighbours ${adjMorale.toFixed(1)}`);
+        if (adjMorale > 0)   moraleTickBreakdown.plus.push(`Good layout +${adjMorale.toFixed(1)}`);
         moraleTickBreakdown.net += netMoraleDelta;
         setMorale(prev => clamp(prev + netMoraleDelta, -100, 100));
         const veteranCount = cols.filter(c => c.traits?.includes("veteran")).length;
@@ -931,28 +942,39 @@ export default function Speranza() {
           statReasons[stat].net += delta;
         };
 
-        g.forEach(row => row.forEach(cell => {
+        g.forEach((row, ri) => row.forEach((cell, ci) => {
           if (!cell.type || !cell.workers) return;
           const def = ROOM_TYPES[cell.type];
           if (def.special === "barracks" || def.special === "armory" || def.special === "tavern" || def.special === "diningHall" ||
               def.special === "arcTurret" || def.special === "empArray" || def.special === "blastDoors" || def.special === "geothermal") return;
           if (cell.damaged) return; // damaged rooms don't produce
 
+          // Where a room sits relative to its neighbours now changes what it
+          // does — see calcAdjacency(). Columns used to be entirely inert.
+          const adj = calcAdjacency(g, ri, ci);
+
           let canRun = true;
           for (const [r, amt] of Object.entries(def.consumes)) {
-            if (next[r] < amt * cell.workers) { canRun = false; break; }
+            const need = r === "energy"
+              ? Math.max(0, amt + adj.energyDelta) * cell.workers
+              : amt * cell.workers;
+            if (next[r] < need) { canRun = false; break; }
           }
           if (!canRun) return;
 
           for (const [r, amt] of Object.entries(def.consumes)) {
-            next[r] = clamp(next[r] - amt * cell.workers, 0, MAX_RES);
-            flow[r] -= amt * cell.workers;
-            if (r === "energy" || r === "food" || r === "water") pushReason(r, -(amt * cell.workers), `${def.label} upkeep`);
+            const used = r === "energy"
+              ? Math.max(0, amt + adj.energyDelta) * cell.workers
+              : amt * cell.workers;
+            next[r] = clamp(next[r] - used, 0, MAX_RES);
+            flow[r] -= used;
+            if (r === "energy" || r === "food" || r === "water") pushReason(r, -used, `${def.label} upkeep`);
           }
           for (const [r, amt] of Object.entries(def.produces)) {
-            next[r] = clamp(next[r] + amt * cell.workers, 0, MAX_RES);
-            flow[r] += amt * cell.workers;
-            if (r === "energy" || r === "food" || r === "water") pushReason(r, amt * cell.workers, `${def.label} output`);
+            const made = amt * cell.workers * adj.outputMult;
+            next[r] = clamp(next[r] + made, 0, MAX_RES);
+            flow[r] += made;
+            if (r === "energy" || r === "food" || r === "water") pushReason(r, made, `${def.label} output`);
           }
         }));
 
@@ -1450,8 +1472,13 @@ export default function Speranza() {
       // 4. Heal injured colonists ───────────────────────────────────────────
       // Count available nurses in the hospital
       let nursesAvailable = 0;
-      g.forEach(row => row.forEach(cell => {
-        if (cell.type === "hospital") nursesAvailable += cell.workers;
+      // Best bedside bonus among the built hospitals — a hospital placed next
+      // to the barracks heals faster than one tucked away in a corner.
+      let bedsideMult = 1;
+      g.forEach((row, ri) => row.forEach((cell, ci) => {
+        if (cell.type !== "hospital") return;
+        nursesAvailable += cell.workers;
+        bedsideMult = Math.max(bedsideMult, calcAdjacency(g, ri, ci).healMult);
       }));
 
       // Work out the healing result first, then apply it as a pure patch map.
@@ -1473,7 +1500,7 @@ export default function Speranza() {
           // Quirk: workaholic heals 25% slower, insomniac heals 15% slower
           if (col.quirk?.id === "workaholic")  healRate *= 0.75;
           if (col.quirk?.id === "insomniac")   healRate *= 0.85;
-          const newTicks = (col.injuryTicksLeft ?? INJURY_TICKS_BASE) - healRate;
+          const newTicks = (col.injuryTicksLeft ?? INJURY_TICKS_BASE) - healRate * bedsideMult;
           if (newTicks <= 0) {
             const { room, ...patch } = reclaimPost(col, g, seats);
             healPatches.set(col.id, { ...patch, injuryTicksLeft: 0 });
@@ -2221,6 +2248,7 @@ export default function Speranza() {
     setTick(0);
     setGameOver(null);
     setLog(["Colony restarted."]);
+    setColonyName("SPERANZA");
     setMorale(50);
     setUnlockedRows([0]);
     setSurfaceHaul({ salvage: 0, arcTech: 0, schematics: [] });
@@ -2297,6 +2325,8 @@ export default function Speranza() {
 
       <ColonyHeader
         tick={tick}
+        colonyName={colonyName}
+        onRenameColony={setColonyName}
         timescale={timescale}
         musicVolume={musicVolume}
         res={res}
@@ -2343,7 +2373,7 @@ export default function Speranza() {
 
       <TraitPicker colonists={colonists} onPickTrait={handlePickTrait} />
 
-      <GameOverModal gameOver={gameOver} historyLog={historyLog} onRestart={handleRestart} />
+      <GameOverModal gameOver={gameOver} historyLog={historyLog} colonyName={colonyName} onRestart={handleRestart} />
 
       <DilemmaModal activeDilemma={activeDilemma} onChoice={handleDilemmaChoice} />
 
