@@ -42,7 +42,7 @@ import {
   STATUS_COLOR, STATUS_LABEL, tickToDayHour, checkMilestoneTrigger,
   earthTexture,
   reconcileGridWorkers, pruneInvalidAssignments, postStatusFor, isOnPost,
-  occupiedSeats, reclaimPost,
+  occupiedSeats, reclaimPost, advanceExpeditions,
 } from "./gameData.js";
 import SurfaceDefense from './surface_defense';
 import SkyBackground   from './components/SkyBackground.jsx';
@@ -542,6 +542,86 @@ export default function Speranza() {
   }, []);
   const addHistoryRef = useRef(addHistory);
   useEffect(() => { addHistoryRef.current = addHistory; }, [addHistory]);
+
+  // ── Expedition intents ────────────────────────────────────────────────────
+  // advanceExpeditions() is pure and hands back declarative intents; this is the
+  // one place they turn into colony state, logs, sounds and morale. Everything
+  // here must be safe to run exactly once per intent — no RNG decisions that
+  // the pure transition already made, and no work inside a state updater beyond
+  // a deterministic map.
+  const applyExpeditionIntent = useCallback((intent) => {
+    switch (intent.type) {
+      case "injureColonist":
+        setColonists(prev => prev.map(c => c.id === intent.colonistId
+          ? { ...c, status: "injured", previousRoom: c.assignedRoom ?? c.previousRoom ?? null,
+              assignedRoom: null, injuryTicksLeft: INJURY_TICKS_BASE, injuryCount: (c.injuryCount ?? 0) + 1 }
+          : c));
+        break;
+
+      case "killColonist":
+        setColonists(prev => prev.filter(c => c.id !== intent.colonist.id));
+        addToMemorialRef.current(intent.colonist, "expeditionKilled", tickRef.current);
+        pushEventTrace("colonist_killed", intent.colonist.name, "expedition");
+        break;
+
+      case "collectLoot": {
+        const loot = intent.loot;
+        if (loot.scrap) setRes(p => ({ ...p, scrap: clamp(p.scrap + loot.scrap, 0, MAX_RES) }));
+        if (loot.salvage || loot.arcTech || loot.schematicFound) {
+          setSurfaceHaul(p => ({
+            salvage:    p.salvage + (loot.salvage || 0),
+            arcTech:    p.arcTech + (loot.arcTech || 0),
+            schematics: loot.schematicFound && !p.schematics.includes(loot.schematicFound)
+              ? [...p.schematics, loot.schematicFound]
+              : p.schematics,
+          }));
+        }
+        break;
+      }
+
+      case "survivor": {
+        const newCol = makeColonist(tickRef.current);
+        setColonists(p => [...p, newCol]);
+        addLog(`🧍 Surface survivor found — ${newCol.name} joined the colony!`);
+        break;
+      }
+
+      case "returnCrew":
+        // Deterministic map — safe as an updater, and it needs the freshest
+        // seat counts to decide who can reclaim their old post.
+        setColonists(prev => {
+          const seats = occupiedSeats(prev);
+          return prev.map(c => {
+            if (!intent.colonistIds.includes(c.id)) return c;
+            const { room, ...patch } = reclaimPost(c, gridRef.current, seats);
+            return { ...c, ...patch, expeditionsCompleted: (c.expeditionsCompleted ?? 0) + 1 };
+          });
+        });
+        break;
+
+      case "expeditionComplete":
+        setExpeditionsCompleted(prev => {
+          const next = prev + 1;
+          expeditionsCompletedRef.current = next;
+          if (next === 1) addHistoryRef.current("🗺", "First expedition returned");
+          return next;
+        });
+        break;
+
+      case "morale": changeMoraleRef.current(intent.delta, intent.reason); break;
+      case "log":    addLog(intent.text); break;
+      case "toast":  addToast(intent.message, intent.kind, intent.opts); break;
+      case "trace":  pushEventTrace(intent.event, intent.entity ?? null, intent.detail ?? null); break;
+      case "sound":
+        if (intent.name === "injury")  playInjury();
+        if (intent.name === "kill")    playKill();
+        if (intent.name === "success") playSuccess();
+        break;
+      default: break;
+    }
+  }, [addLog, addToast, pushEventTrace]);
+  const applyExpeditionIntentRef = useRef(applyExpeditionIntent);
+  useEffect(() => { applyExpeditionIntentRef.current = applyExpeditionIntent; }, [applyExpeditionIntent]);
 
   // ── Milestone checker ─────────────────────────────────────────────────────
   const checkMilestones = useCallback((snap) => {
@@ -1332,135 +1412,28 @@ export default function Speranza() {
       }
 
       // 3. Expedition rolls ──────────────────────────────────────────────────
-      setExpeditions(prev => prev.map(exp => {
-        let updated = { ...exp, ticksLeft: exp.ticksLeft - 1, rollCountdown: exp.rollCountdown - 1 };
-
-        if (updated.rollCountdown <= 0 && updated.ticksLeft > 0) {
-          const expColonists = colonistsRef.current.filter(c => exp.colonistIds.includes(c.id));
-          let table = [...EXPEDITION_ROLL_TABLES[exp.type]];
-          table = applyMoraleModifier(table, exp.moraleSnapshot);
-          const condEffects = exp.conditionSnapshot?.effects ?? {};
-          const expedGoodMult = condEffects.expedGoodMult ?? 1.0;
-          const expedBadMult  = condEffects.expedBadMult ?? 1.0;
-          table = table.map(e => ({
-            ...e,
-            weight: e.type === "good" ? e.weight * expedGoodMult
-                  : e.type === "bad"  ? e.weight * expedBadMult
-                  : e.weight,
-          }));
-          expColonists.forEach(col => {
-            if (col.traits?.includes("scavenger") && exp.type === "scav") {
-              table = table.map(e => ({ ...e, weight: e.type === "good" ? e.weight * 1.15 : e.weight }));
-            }
-            if (col.traits?.includes("ghost")) {
-              table = table.map(e => ({ ...e, weight: e.type === "bad" ? e.weight * 0.9 : e.weight }));
-            }
-          });
-          // surfaceBorn quirk: +20% good weight
-          if (exp.quirkBonuses?.surfaceBorn) {
-            table = table.map(e => ({ ...e, weight: e.type === "good" ? e.weight * 1.2 : e.weight }));
-          }
-
-          const totalWeight = table.reduce((s, e) => s + e.weight, 0);
-          let rand = Math.random() * totalWeight;
-          let picked = table[table.length - 1];
-          for (const entry of table) { rand -= entry.weight; if (rand <= 0) { picked = entry; break; } }
-
-          const result = picked.apply(exp);
-          const tickLabel = `[T${tickRef.current}]`;
-          // Expedition radio chatter — prefix to log entries unless expedSilent
-          const getChatter = (outcomeType) => {
-            if (surfaceConditionRef.current.effects.expedSilent) return "";
-            const pool = EXPEDITION_FLAVOR[exp.type]?.[outcomeType];
-            if (!pool || pool.length === 0) return "";
-            return pool[Math.floor(Math.random() * pool.length)] + " ";
-          };
-
-          if (result === "injure" || result === "kill") {
-            const target = expColonists.length > 0 ? expColonists[Math.floor(Math.random() * expColonists.length)] : null;
-            if (target) {
-              if (result === "injure") {
-                setColonists(p => p.map(c => c.id === target.id ? { ...c, status: "injured", injuryTicksLeft: INJURY_TICKS_BASE, injuryCount: (c.injuryCount ?? 0) + 1 } : c));
-                updated.eventLog = [...updated.eventLog, `${tickLabel} ${getChatter("bad")}${target.name} ${picked.label}.`];
-                changeMoraleRef.current(-10, "colonist injured on expedition");
-                playInjury();
-              } else {
-                setColonists(p => p.filter(c => c.id !== target.id));
-                addToMemorialRef.current(target, "expeditionKilled", tickRef.current);
-                updated.eventLog = [...updated.eventLog, `${tickLabel} ${getChatter("bad")}${target.name} ${picked.label}.`];
-                const expKillPenalty = hasMemorialHall() ? -12 : -20;
-                changeMoraleRef.current(expKillPenalty, "colonist killed on expedition");
-                playKill();
-              }
-            }
-          } else if (typeof result === "object") {
-            const newLoot = { ...updated.lootAccumulated };
-            if (result.scrap)    { newLoot.scrap    = (newLoot.scrap    || 0) + result.scrap + (exp.quirkBonuses?.packRat ? 1 : 0); }
-            if (result.salvage)  { newLoot.salvage  = (newLoot.salvage  || 0) + result.salvage + (exp.quirkBonuses?.packRat ? 1 : 0); }
-            if (result.arcTech)  { newLoot.arcTech  = (newLoot.arcTech  || 0) + result.arcTech; }
-            if (result.survivor) { newLoot.survivor = true; }
-            if (result.schematic) {
-              const allSchematics = ["turretSchematics","empSchematics","fortSchematics","geoSchematics","researchSchematics"];
-              const owned = surfaceHaulRef.current.schematics;
-              const available = allSchematics.filter(s => !owned.includes(s));
-              if (available.length > 0) {
-                const found = available[Math.floor(Math.random() * available.length)];
-                newLoot.schematicFound = found;
-                updated.eventLog = [...updated.eventLog, `${tickLabel} 📋 SCHEMATIC FOUND — ${found}!`];
-                addToast(`📋 SCHEMATIC RECOVERED\n${found}\nCheck the build menu.`, "success");
-              }
-            }
-            updated.lootAccumulated = newLoot;
-            if (picked.type !== "neutral") {
-              updated.eventLog = [...updated.eventLog, `${tickLabel} ${getChatter(picked.type)}${picked.label}.`];
-            } else {
-              updated.eventLog = [...updated.eventLog, `${tickLabel} ${getChatter("neutral")}${picked.label}.`];
-            }
-          }
-          updated.rollCountdown = exp.rollEvery;
+      // Advancement is a pure transition; every consequence comes back as an
+      // intent applied exactly once below. See advanceExpeditions() for why.
+      {
+        const { nextExpeditions, intents } = advanceExpeditions(
+          expeditionsRef.current,
+          {
+            colonists: colonistsRef.current,
+            ownedSchematics: surfaceHaulRef.current.schematics,
+            condEffects: surfaceConditionRef.current.effects,
+            tick: tickRef.current,
+            memorialHall: hasMemorialHall(),
+          },
+        );
+        if (nextExpeditions !== expeditionsRef.current) {
+          // Sync the ref immediately so a decision handler or the next interval
+          // never reads stale expedition data before React commits.
+          expeditionsRef.current = nextExpeditions;
+          setExpeditions(nextExpeditions);
         }
+        intents.forEach(applyExpeditionIntentRef.current);
+      }
 
-        if (updated.ticksLeft <= 0) {
-          pushEventTrace("expedition_returned", null, updated.type);
-          const loot = updated.lootAccumulated;
-          if (loot.scrap)   setRes(p => ({ ...p, scrap: clamp(p.scrap + loot.scrap, 0, MAX_RES) }));
-          if (loot.salvage || loot.arcTech || loot.schematicFound) {
-            setSurfaceHaul(p => ({
-              salvage:    p.salvage + (loot.salvage  || 0),
-              arcTech:    p.arcTech + (loot.arcTech  || 0),
-              schematics: loot.schematicFound ? [...p.schematics, loot.schematicFound] : p.schematics,
-            }));
-          }
-          if (loot.survivor) {
-            const newCol = makeColonist(tickRef.current);
-            setColonists(p => [...p, newCol]);
-            addLog(`🧍 Surface survivor found — ${newCol.name} joined the colony!`);
-          }
-          setColonists(p => {
-            const seats = occupiedSeats(p);
-            return p.map(c => {
-              if (!updated.colonistIds.includes(c.id)) return c;
-              const { room, ...patch } = reclaimPost(c, gridRef.current, seats);
-              return { ...c, ...patch, expeditionsCompleted: (c.expeditionsCompleted ?? 0) + 1 };
-            });
-          });
-          const hasGoodLoot = (loot.scrap || 0) > 0 || (loot.salvage || 0) > 0 || (loot.arcTech || 0) > 0;
-          addLog(`✅ Expedition returned. ${hasGoodLoot ? `+${loot.scrap || 0} scrap${loot.salvage ? ` · +${loot.salvage} salvage` : ""}${loot.arcTech ? ` · +${loot.arcTech} arcTech` : ""}` : "Empty-handed."}`);
-          addToast(`✅ EXPEDITION COMPLETE\n${hasGoodLoot ? "Resources recovered." : "They came back empty-handed."}`, hasGoodLoot ? "success" : "info");
-          const baseMoraleChange = hasGoodLoot ? 8 : -5;
-          const loudmouthBonus = (updated.quirkBonuses?.loudmouth && hasGoodLoot) ? 5 : 0;
-          changeMoraleRef.current(baseMoraleChange + loudmouthBonus, hasGoodLoot ? "expedition success" : "expedition failed");
-          setExpeditionsCompleted(prev => {
-            const next = prev + 1;
-            expeditionsCompletedRef.current = next;
-            if (next === 1) addHistoryRef.current("🗺", "First expedition returned");
-            return next;
-          });
-          playSuccess();
-          return null;
-        }
-        return updated;
-      }).filter(Boolean));
 
       // 4. Heal injured colonists ───────────────────────────────────────────
       // Count available nurses in the hospital
@@ -2128,16 +2101,16 @@ export default function Speranza() {
       }
     }
     const outcomeSummary = outcomeBits.length > 0 ? outcomeBits.join(" · ") : "No immediate effect.";
-    setRecentDilemmaOutcomes(prev => [
-      {
-        id: `d-${Date.now()}-${Math.random()}`,
-        tick: tickRef.current,
-        title: activeDilemma?.title ?? activeDilemma?.id ?? "Dilemma",
-        choice: choice.label,
-        summary: outcomeSummary,
-      },
-      ...prev,
-    ].slice(0, 8));
+    // id generated outside the updater so the audit stays at zero — a state
+    // updater must never contain randomness, even for a React key.
+    const outcomeEntry = {
+      id: `d-${Date.now()}-${Math.random()}`,
+      tick: tickRef.current,
+      title: activeDilemma?.title ?? activeDilemma?.id ?? "Dilemma",
+      choice: choice.label,
+      summary: outcomeSummary,
+    };
+    setRecentDilemmaOutcomes(prev => [outcomeEntry, ...prev].slice(0, 8));
     addToast(`📋 DILEMMA RESOLVED\n${choice.label}\n${outcomeSummary}`, "info", {
       key: `dilemma-${activeDilemma?.id}-${choice.label}-${tickRef.current}`,
       dedupeMs: 200,

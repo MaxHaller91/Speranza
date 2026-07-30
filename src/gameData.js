@@ -2,7 +2,7 @@
 // All pure data, constants, and stateless helpers for Speranza.
 // No React, no hooks, no side effects.
 
-import { BACKSTORIES, QUIRKS } from "../speranza-lore.js";
+import { BACKSTORIES, QUIRKS, EXPEDITION_FLAVOR } from "../speranza-lore.js";
 
 import powerCellSprite  from "./Assets/Buildings/Power Cell.png";
 import waterPumpSprite  from "./Assets/Buildings/Water Pump.png";
@@ -328,6 +328,153 @@ export const EXPEDITION_ROLL_TABLES = {
     { id: "killed",      weight: 10, type: "bad",     label: "was killed",                   apply: () => "kill" },
   ],
 };
+
+// ─── Expedition advancement (pure) ───────────────────────────────────────────
+// The whole expedition system used to live inside
+// `setExpeditions(prev => prev.map(...))`, rolling Math.random and calling
+// setColonists / addLog / addToast / playKill from inside the updater. Under
+// StrictMode that ran twice per tick with *different* random outcomes, so loot,
+// injuries and deaths were resolved twice and only one result survived.
+//
+// This is the pure half: given a snapshot it returns the next expedition list
+// plus a list of declarative intents. The caller applies each intent exactly
+// once, outside every updater. RNG is injected so this is testable.
+
+/** Weighted pick from a roll table. */
+function pickWeighted(table, rng) {
+  const total = table.reduce((s, e) => s + e.weight, 0);
+  let r = rng() * total;
+  for (const entry of table) { r -= entry.weight; if (r <= 0) return entry; }
+  return table[table.length - 1];
+}
+
+/** Build the outcome table for one expedition, with all modifiers applied. */
+function buildRollTable(exp, crew, condEffects) {
+  let table = applyMoraleModifier([...EXPEDITION_ROLL_TABLES[exp.type]], exp.moraleSnapshot);
+  const goodMult = condEffects?.expedGoodMult ?? 1.0;
+  const badMult  = condEffects?.expedBadMult ?? 1.0;
+  const scale = (t, mult) => { table = table.map(e => e.type === t ? { ...e, weight: e.weight * mult } : e); };
+  scale("good", goodMult);
+  scale("bad", badMult);
+  crew.forEach(col => {
+    if (col.traits?.includes("scavenger") && exp.type === "scav") scale("good", 1.15);
+    if (col.traits?.includes("ghost")) scale("bad", 0.9);
+  });
+  if (exp.quirkBonuses?.surfaceBorn) scale("good", 1.2);
+  return table;
+}
+
+const ALL_SCHEMATICS = ["turretSchematics", "empSchematics", "fortSchematics", "geoSchematics", "researchSchematics"];
+
+/**
+ * Advance every expedition by one tick.
+ * @returns {{ nextExpeditions: object[], intents: object[] }}
+ */
+export function advanceExpeditions(expeditions, ctx, rng = Math.random) {
+  const { colonists, ownedSchematics = [], condEffects = {}, tick = 0, memorialHall = false } = ctx;
+  const intents = [];
+  // Two expeditions can resolve in the same tick; track schematics claimed
+  // during this call so they can't both find the same one.
+  const claimedSchematics = [...ownedSchematics];
+  // A colonist killed by one expedition must not also be hit by another.
+  const removedIds = new Set();
+  let changed = false;
+
+  const next = expeditions.map(exp => {
+    const updated = {
+      ...exp,
+      ticksLeft: exp.ticksLeft - 1,
+      rollCountdown: exp.rollCountdown - 1,
+      eventLog: [...exp.eventLog],
+      lootAccumulated: { ...exp.lootAccumulated },
+    };
+    changed = true;
+
+    const crew = colonists.filter(c => exp.colonistIds.includes(c.id) && !removedIds.has(c.id));
+    const tickLabel = `[T${tick}]`;
+    const chatter = (outcomeType) => {
+      if (condEffects.expedSilent) return "";
+      const pool = EXPEDITION_FLAVOR[exp.type]?.[outcomeType];
+      if (!pool || pool.length === 0) return "";
+      return pool[Math.floor(rng() * pool.length)] + " ";
+    };
+
+    // ── Periodic outcome roll ──
+    if (updated.rollCountdown <= 0 && updated.ticksLeft > 0) {
+      const picked = pickWeighted(buildRollTable(exp, crew, condEffects), rng);
+      const result = picked.apply(exp);
+
+      if (result === "injure" || result === "kill") {
+        const target = crew.length > 0 ? crew[Math.floor(rng() * crew.length)] : null;
+        if (target) {
+          updated.eventLog.push(`${tickLabel} ${chatter("bad")}${target.name} ${picked.label}.`);
+          if (result === "injure") {
+            intents.push({ type: "injureColonist", colonistId: target.id });
+            intents.push({ type: "morale", delta: -10, reason: "colonist injured on expedition" });
+            intents.push({ type: "sound", name: "injury" });
+          } else {
+            removedIds.add(target.id);
+            updated.colonistIds = updated.colonistIds.filter(id => id !== target.id);
+            intents.push({ type: "killColonist", colonist: target });
+            intents.push({ type: "morale", delta: memorialHall ? -12 : -20, reason: "colonist killed on expedition" });
+            intents.push({ type: "sound", name: "kill" });
+          }
+        }
+      } else if (typeof result === "object") {
+        const loot = updated.lootAccumulated;
+        if (result.scrap)   loot.scrap   = (loot.scrap   || 0) + result.scrap   + (exp.quirkBonuses?.packRat ? 1 : 0);
+        if (result.salvage) loot.salvage = (loot.salvage || 0) + result.salvage + (exp.quirkBonuses?.packRat ? 1 : 0);
+        if (result.arcTech) loot.arcTech = (loot.arcTech || 0) + result.arcTech;
+        if (result.survivor) loot.survivor = true;
+        if (result.schematic) {
+          const available = ALL_SCHEMATICS.filter(s => !claimedSchematics.includes(s));
+          if (available.length > 0) {
+            const found = available[Math.floor(rng() * available.length)];
+            claimedSchematics.push(found);
+            loot.schematicFound = found;
+            updated.eventLog.push(`${tickLabel} 📋 SCHEMATIC FOUND — ${found}!`);
+            intents.push({ type: "toast", message: `📋 SCHEMATIC RECOVERED\n${found}\nCheck the build menu.`, kind: "success" });
+          }
+        }
+        updated.eventLog.push(`${tickLabel} ${chatter(picked.type)}${picked.label}.`);
+      }
+      updated.rollCountdown = exp.rollEvery;
+    }
+
+    // ── Return ──
+    if (updated.ticksLeft <= 0) {
+      const loot = updated.lootAccumulated;
+      const hasGoodLoot = (loot.scrap || 0) > 0 || (loot.salvage || 0) > 0 || (loot.arcTech || 0) > 0;
+      intents.push({ type: "trace", event: "expedition_returned", detail: updated.type });
+      intents.push({ type: "collectLoot", loot });
+      if (loot.survivor) intents.push({ type: "survivor" });
+      // Only colonists still alive come home.
+      intents.push({ type: "returnCrew", colonistIds: updated.colonistIds.filter(id => !removedIds.has(id)) });
+      intents.push({
+        type: "log",
+        text: `✅ Expedition returned. ${hasGoodLoot
+          ? `+${loot.scrap || 0} scrap${loot.salvage ? ` · +${loot.salvage} salvage` : ""}${loot.arcTech ? ` · +${loot.arcTech} arcTech` : ""}`
+          : "Empty-handed."}`,
+      });
+      intents.push({
+        type: "toast",
+        message: `✅ EXPEDITION COMPLETE\n${hasGoodLoot ? "Resources recovered." : "They came back empty-handed."}`,
+        kind: hasGoodLoot ? "success" : "info",
+      });
+      intents.push({
+        type: "morale",
+        delta: (hasGoodLoot ? 8 : -5) + ((updated.quirkBonuses?.loudmouth && hasGoodLoot) ? 5 : 0),
+        reason: hasGoodLoot ? "expedition success" : "expedition failed",
+      });
+      intents.push({ type: "expeditionComplete" });
+      intents.push({ type: "sound", name: "success" });
+      return null;
+    }
+    return updated;
+  }).filter(Boolean);
+
+  return { nextExpeditions: changed ? next : expeditions, intents };
+}
 
 export function applyMoraleModifier(table, moraleSnapshot) {
   const modifier = moraleSnapshot > 75 ? 1.15 : moraleSnapshot > 25 ? 1.0 : moraleSnapshot > 0 ? 0.9 : 0.8;
