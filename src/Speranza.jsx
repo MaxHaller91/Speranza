@@ -1554,6 +1554,9 @@ export default function Speranza() {
       }
       // All living colonists age. On-duty colonists earn 1 XP per 10 duty ticks.
       // Level up every 20 XP → pendingTraitPick flag set.
+      // Announce level-ups outside the updater — logging from inside meant every
+      // promotion was written to the log twice under StrictMode.
+      const levelUps = [];
       setColonists(prev => prev.map(col => {
         const onDuty   = col.status === "working" || col.status === "onSentry";
         const newAlive = (col.ticksAlive ?? 0) + 1;
@@ -1564,10 +1567,8 @@ export default function Speranza() {
         const newXp    = (col.xp ?? 0) + (onDuty && newDuty % xpInterval === 0 ? 1 : 0);
         const newLevel = Math.floor(newXp / 20);
         const leveled  = newLevel > (col.level ?? 0);
-        if (leveled) {
-          pushEventTrace("colonist_level_up", col.name, `${newLevel}`);
-          addLog(`⭐ ${col.name} reached Level ${newLevel}! Trait selection available.`);
-          changeMoraleRef.current(5, "morale boost from achievement");
+        if (leveled && !levelUps.some(l => l.name === col.name && l.level === newLevel)) {
+          levelUps.push({ name: col.name, level: newLevel });
         }
         return {
           ...col,
@@ -1578,6 +1579,11 @@ export default function Speranza() {
           pendingTraitPick: leveled ? true : col.pendingTraitPick,
         };
       }));
+      levelUps.forEach(({ name, level }) => {
+        pushEventTrace("colonist_level_up", name, `${level}`);
+        addLog(`⭐ ${name} reached Level ${level}! Trait selection available.`);
+        changeMoraleRef.current(5, "morale boost from achievement");
+      });
 
       // 6. Excavation progress ──────────────────────────────────────────────
       const excavNow = excavationsRef.current;
