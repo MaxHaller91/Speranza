@@ -2235,10 +2235,14 @@ export default function Speranza() {
             hoveredCell={hoveredCell}
             mousePos={mousePos}
             gridMetrics={gridMetrics}
+            colonists={colonists}
+            hoveredColonist={hoveredColonist}
+            timescale={timescale}
             onCellClick={handleCellClick}
             onStartExcavation={handleStartExcavation}
             onAssign={handleAssign}
             onSetHoveredCell={setHoveredCell}
+            onHoverColonist={setHoveredColonist}
           />
 
           <FlowPanel

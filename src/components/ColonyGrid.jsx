@@ -1,11 +1,14 @@
 // ColonyGrid.jsx — colony grid with locked/unlocked rows and earth mortise overlay
 // Props: grid, unlockedRows, excavations, selected, hoveredCell, mousePos, gridMetrics,
-//        onCellClick, onStartExcavation, onAssign, onSetHoveredCell
+//        colonists, hoveredColonist, onCellClick, onStartExcavation, onAssign,
+//        onSetHoveredCell, onHoverColonist
 import { ROOM_TYPES, EXCAVATION_DEFS, earthTexture } from "../gameData.js";
+import ColonistLayer from "./ColonistLayer.jsx";
 
 export default function ColonyGrid({
   grid, unlockedRows, excavations, selected, hoveredCell, mousePos, gridMetrics,
-  onCellClick, onStartExcavation, onAssign, onSetHoveredCell,
+  colonists, hoveredColonist, timescale,
+  onCellClick, onStartExcavation, onAssign, onSetHoveredCell, onHoverColonist,
 }) {
   return (
     <div style={{ border: "none", boxShadow: "none", borderRadius: 6, overflow: "hidden", background: "transparent", position: "relative" }}>
@@ -242,6 +245,19 @@ export default function ColonyGrid({
           </svg>
         );
       })()}
+
+      {/* Colonists — drawn above the earth overlay, transparent to clicks */}
+      <ColonistLayer
+        colonists={colonists}
+        grid={grid}
+        unlockedRows={unlockedRows}
+        excavations={excavations}
+        gridMetrics={gridMetrics}
+        mousePos={mousePos}
+        hoveredColonist={hoveredColonist}
+        onHoverColonist={onHoverColonist}
+        timescale={timescale}
+      />
     </div>
   );
 }
