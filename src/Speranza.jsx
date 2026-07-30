@@ -67,6 +67,10 @@ export default function Speranza() {
   const [heat,       setHeat]       = useState(0);
   const [expeditions,  setExpeditions]  = useState([]);
   const [expedDuration, setExpedDuration] = useState(40);
+  // Launch draft — the player picks a destination and an exact crew before
+  // committing, instead of the game grabbing whoever happened to be idle first.
+  const [expedLocationId, setExpedLocationId] = useState(SURFACE_LOCATIONS[0].id);
+  const [expedCrewIds,    setExpedCrewIds]    = useState([]);
   const [selected,   setSelected]   = useState(null);
   const [buildMenu,  setBuildMenu]  = useState(false);
   const [hoveredBuildKey, setHoveredBuildKey] = useState(null);
@@ -314,6 +318,7 @@ export default function Speranza() {
       excavations,
       expeditions,
       expedDuration,
+      expedLocationId,
       surfaceHaul,
       unlockedTechs,
       memorial,
@@ -344,6 +349,7 @@ export default function Speranza() {
       excavations: s.excavations,
       expeditions: s.expeditions,
       expedDuration: s.expedDuration,
+      expedLocationId: s.expedLocationId,
       surfaceHaul: s.surfaceHaul,
       unlockedTechs: s.unlockedTechs,
       memorial: s.memorial,
@@ -369,7 +375,7 @@ export default function Speranza() {
     };
   }, [
     tick, res, heat, morale, grid, colonists,
-    unlockedRows, excavations, expeditions, expedDuration,
+    unlockedRows, excavations, expeditions, expedDuration, expedLocationId,
     surfaceHaul, unlockedTechs, memorial,
     raidsRepelled, largeRaidsRepelled, expeditionsCompleted,
     surfaceCondition, surfaceConditionTimer, peakPopulation,
@@ -566,7 +572,11 @@ export default function Speranza() {
 
       case "collectLoot": {
         const loot = intent.loot;
-        if (loot.scrap) setRes(p => ({ ...p, scrap: clamp(p.scrap + loot.scrap, 0, MAX_RES) }));
+        if (loot.scrap || loot.food) setRes(p => ({
+          ...p,
+          scrap: clamp(p.scrap + (loot.scrap || 0), 0, MAX_RES),
+          food:  clamp(p.food  + (loot.food  || 0), 0, MAX_RES),
+        }));
         if (loot.salvage || loot.arcTech || loot.schematicFound) {
           setSurfaceHaul(p => ({
             salvage:    p.salvage + (loot.salvage || 0),
@@ -694,6 +704,8 @@ export default function Speranza() {
       setExcavations(state.excavations ?? {});
       setExpeditions(Array.isArray(state.expeditions) ? state.expeditions : []);
       setExpedDuration(state.expedDuration ?? 40);
+      setExpedLocationId(state.expedLocationId ?? SURFACE_LOCATIONS[0].id);
+      setExpedCrewIds([]);
       setSurfaceHaul(state.surfaceHaul ?? { salvage: 0, arcTech: 0, schematics: [] });
       setUnlockedTechs(Array.isArray(state.unlockedTechs) ? state.unlockedTechs : []);
       setMemorial(Array.isArray(state.memorial) ? state.memorial : []);
@@ -2012,7 +2024,21 @@ export default function Speranza() {
       addLog(`⚠ All available colonists are Tunnel-Blind — cannot go topside`);
       return;
     }
-    const picked   = idle.slice(0, def.colonistsRequired);
+    // Use exactly the crew the player picked. Fall back to first-eligible only
+    // if the draft is somehow short, so the button can never dead-end.
+    const draft  = expedCrewIds
+      .map(id => idle.find(c => c.id === id))
+      .filter(Boolean)
+      .slice(0, def.colonistsRequired);
+    const picked = draft.length === def.colonistsRequired
+      ? draft
+      : [...draft, ...idle.filter(c => !draft.includes(c))].slice(0, def.colonistsRequired);
+    if (picked.length < def.colonistsRequired) {
+      addLog(`⚠ Select ${def.colonistsRequired} crew member(s) before launching`);
+      return;
+    }
+
+    const location = SURFACE_LOCATIONS.find(l => l.id === expedLocationId) ?? SURFACE_LOCATIONS[0];
     const names    = picked.map(c => c.name).join(" & ");
     const rollEvery = type === "scav" ? 8 : 6;
     // surfaceBorn: +20% good roll weight; packRat: bonus scrap+salvage tracked on expedition
@@ -2022,13 +2048,20 @@ export default function Speranza() {
     const newExp = {
       id: `exp-${Date.now()}`,
       type,
+      locationId:      location.id,
+      locationLabel:   location.label,
+      locationIcon:    location.icon,
+      locationColor:   location.color,
+      // Snapshotted at launch, like morale and surface condition, so a later
+      // lore edit can't retroactively change a run already in the field.
+      locationMods:    { ...location.rollMods },
       duration:        expedDuration,
       ticksLeft:       expedDuration,
       rollEvery,
       rollCountdown:   rollEvery,
       colonistIds:     picked.map(c => c.id),
       eventLog:        [],
-      lootAccumulated: { scrap: 0, salvage: 0, arcTech: 0, survivor: false },
+      lootAccumulated: { scrap: 0, food: 0, salvage: 0, arcTech: 0, survivor: false },
       moraleSnapshot:  morale,
       conditionSnapshot: { ...surfaceCondition },
       quirkBonuses:    { surfaceBorn: hasSurfaceBorn, packRat: hasPackRat, loudmouth: hasLoudmouth },
@@ -2040,9 +2073,20 @@ export default function Speranza() {
     );
     setHeat(t => clamp(t + (heatSuppressedTicksRef.current > 0 ? 0 : def.threatDelta), 0, HEAT_MAX));
     setExpeditions(prev => [...prev, newExp]);
+    setExpedCrewIds([]);   // clear the draft so the next launch starts fresh
     pushEventTrace("expedition_launched", null, type);
-    addLog(`${def.icon} ${names} deployed on ${def.label} (${expedDuration}t). ~${Math.floor(expedDuration / rollEvery)} rolls expected.`);
+    addLog(`${def.icon} ${names} deployed to ${location.icon} ${location.label} (${expedDuration}t). ~${Math.floor(expedDuration / rollEvery)} rolls expected.`);
     playExpedition();
+  };
+
+  /** Toggle a colonist in the launch draft, capped at the mission's crew size. */
+  const handleToggleCrew = (colonistId, maxCrew) => {
+    setExpedCrewIds(prev => {
+      if (prev.includes(colonistId)) return prev.filter(id => id !== colonistId);
+      if (prev.length >= maxCrew) return [...prev.slice(1), colonistId]; // oldest out
+      return [...prev, colonistId];
+    });
+    playUiClick();
   };
 
   const handleDilemmaChoice = (choice) => {
@@ -2167,6 +2211,8 @@ export default function Speranza() {
     setHeat(0);
     setExpeditions([]);
     setExpedDuration(40);
+    setExpedLocationId(SURFACE_LOCATIONS[0].id);
+    setExpedCrewIds([]);
     setRaidWindow(null);
     setActiveRaid(null);
     setUnlockedTechs([]);
@@ -2404,6 +2450,8 @@ export default function Speranza() {
           armoryArmed={armoryArmed}
           expeditions={expeditions}
           expedDuration={expedDuration}
+          expedLocationId={expedLocationId}
+          expedCrewIds={expedCrewIds}
           unassigned={unassigned}
           unlockedTechs={unlockedTechs}
           res={res}
@@ -2412,6 +2460,8 @@ export default function Speranza() {
           onAssign={handleAssign}
           onSetExpedDuration={setExpedDuration}
           onLaunchExpedition={handleLaunchExpedition}
+          onSetExpedLocation={setExpedLocationId}
+          onToggleCrew={handleToggleCrew}
           onBackToWork={handleBackToWork}
           onSoundAlarm={handleSoundAlarm}
           onRepair={handleRepair}

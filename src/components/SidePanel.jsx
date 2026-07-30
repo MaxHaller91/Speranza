@@ -1,6 +1,34 @@
 // SidePanel.jsx — right panel: log, colony effects, colonist detail, room panel, memorial
 // Props: (see bottom of file for full prop list)
 import { ROOM_TYPES, EXPEDITION_TYPES, T2_TECHS, TRAITS, STATUS_COLOR, STATUS_LABEL, tickToDayHour } from "../gameData.js";
+import { SURFACE_LOCATIONS } from "../../speranza-lore.js";
+
+const RISK_COLOR = {
+  LOW: "#7ed321", MEDIUM: "#e8d44d", HIGH: "#ff8800",
+  EXTREME: "#ff4444", UNKNOWN: "#bb44ff",
+};
+
+/**
+ * Turn a destination's roll modifiers into a qualitative sentence. Deliberately
+ * no percentages — the player should read intent, not do arithmetic.
+ */
+function describeHaul(mods = {}) {
+  const strong = [];
+  const weak   = [];
+  const rate = (label, v) => { if (v >= 1.3) strong.push(label); else if (v && v <= 0.75) weak.push(label); };
+  rate("scrap", mods.scrapMult);
+  rate("salvage", mods.salvageMult);
+  rate("Arc tech", mods.arcTechMult);
+  const notes = [];
+  if (strong.length) notes.push(`Rich in ${strong.join(" & ")}`);
+  if (weak.length)   notes.push(`little ${weak.join(" or ")}`);
+  if (mods.foodBonus) notes.push("food can be grown here");
+  if (mods.survivorChance >= 0.1) notes.push("survivors have been seen");
+  if (mods.schematicBonus) notes.push("schematics turn up here");
+  if (mods.badMult >= 1.3) notes.push("and it is dangerous");
+  else if (mods.badMult && mods.badMult <= 0.75) notes.push("and it is comparatively safe");
+  return notes.length ? notes.join(" · ") : "An ordinary run.";
+}
 
 export default function SidePanel({
   // display state
@@ -13,13 +41,19 @@ export default function SidePanel({
   // room panel
   selCell, buildMenu, selected,
   armoryArmed, expeditions, expedDuration, unassigned,
+  expedLocationId, expedCrewIds,
   unlockedTechs, res, memorial,
   // callbacks
   onCloseColonist, onAssign, onSetExpedDuration, onLaunchExpedition,
+  onSetExpedLocation, onToggleCrew,
   onBackToWork, onSoundAlarm, onRepair, onDemolish, onUnlockTech,
   onCloseRoom,
 }) {
   const selCol = colonists.find(c => c.id === selectedColonist);
+  const selectedLocation = SURFACE_LOCATIONS.find(l => l.id === expedLocationId) ?? SURFACE_LOCATIONS[0];
+  // Tunnel-Blind colonists can't go topside, so they're never offered.
+  const eligibleCrew = colonists.filter(c => c.status === "idle" && c.quirk?.id !== "tunnelBlind");
+  const maxCrewNeeded = Math.max(...Object.values(EXPEDITION_TYPES).map(d => d.colonistsRequired));
 
   return (
     <div style={{ width: 205, display: "flex", flexDirection: "column", gap: 8, flexShrink: 0 }}>
@@ -216,9 +250,69 @@ export default function SidePanel({
 
                 {expeditions.length < 2 ? (
                   <div>
-                    <div style={{ color: "#884444", fontSize: 9, letterSpacing: 1, marginBottom: 6 }}>LAUNCH EXPEDITION</div>
+                    {/* ── Destination ── */}
+                    <div style={{ color: "#884444", fontSize: 9, letterSpacing: 1, marginBottom: 5 }}>DESTINATION</div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 3, marginBottom: 8, maxHeight: 132, overflowY: "auto" }}>
+                      {SURFACE_LOCATIONS.map(loc => {
+                        const sel = expedLocationId === loc.id;
+                        return (
+                          <button key={loc.id} onClick={() => onSetExpedLocation(loc.id)} title={loc.flavor} style={{
+                            display: "flex", alignItems: "center", gap: 5, width: "100%", textAlign: "left",
+                            background: sel ? `${loc.color}18` : "#0a0a0e",
+                            border: `1px solid ${sel ? loc.color : "#1a1a24"}`,
+                            borderRadius: 4, padding: "3px 6px", cursor: "pointer",
+                          }}>
+                            <span style={{ fontSize: 10 }}>{loc.icon}</span>
+                            <span style={{ flex: 1, fontSize: 8, color: sel ? loc.color : "#66707a", letterSpacing: 0.5 }}>{loc.label}</span>
+                            <span style={{ fontSize: 6.5, color: RISK_COLOR[loc.risk] ?? "#667" }}>{loc.risk}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {selectedLocation && (
+                      <div style={{ fontSize: 7, color: "#4a5560", lineHeight: 1.5, marginBottom: 8, fontStyle: "italic", borderLeft: `2px solid ${selectedLocation.color}55`, paddingLeft: 6 }}>
+                        {selectedLocation.flavor}
+                        <div style={{ marginTop: 3, fontStyle: "normal", color: "#5a6a55" }}>
+                          {describeHaul(selectedLocation.rollMods)}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* ── Crew ── */}
+                    <div style={{ color: "#884444", fontSize: 9, letterSpacing: 1, marginBottom: 5 }}>
+                      CREW {expedCrewIds.length > 0 && <span style={{ color: "#5a7a5a" }}>· {expedCrewIds.length} selected</span>}
+                    </div>
+                    {eligibleCrew.length === 0 ? (
+                      <div style={{ fontSize: 8, color: "#5a3a3a", marginBottom: 8 }}>No eligible colonists — free someone from a post.</div>
+                    ) : (
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginBottom: 8 }}>
+                        {eligibleCrew.map(c => {
+                          const sel = expedCrewIds.includes(c.id);
+                          return (
+                            <button key={c.id}
+                              onClick={() => onToggleCrew(c.id, maxCrewNeeded)}
+                              title={c.quirk ? `${c.quirk.icon} ${c.quirk.label}` : undefined}
+                              style={{
+                                fontSize: 8, letterSpacing: 0.5, fontFamily: "monospace",
+                                background: sel ? "#0d2a14" : "#0a0a0e",
+                                border: `1px solid ${sel ? "#4caf50" : "#22222c"}`,
+                                color: sel ? "#7fd08a" : "#66707a",
+                                borderRadius: 3, padding: "2px 5px", cursor: "pointer",
+                              }}>
+                              {sel ? "✓ " : ""}{c.name}
+                              {(c.level ?? 0) > 0 && <span style={{ color: "#f5a623" }}> L{c.level}</span>}
+                              {c.quirk && <span> {c.quirk.icon}</span>}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {/* ── Launch ── */}
+                    <div style={{ color: "#884444", fontSize: 9, letterSpacing: 1, marginBottom: 6 }}>LAUNCH</div>
                     {Object.entries(EXPEDITION_TYPES).map(([key, def]) => {
-                      const canSend = unassigned >= def.colonistsRequired;
+                      const enough = expedCrewIds.length === def.colonistsRequired;
+                      const canSend = enough && eligibleCrew.length >= def.colonistsRequired;
                       return (
                         <button key={key} onClick={() => onLaunchExpedition(key)} disabled={!canSend} style={{
                           display: "block", width: "100%", marginBottom: 6,
@@ -228,7 +322,11 @@ export default function SidePanel({
                         }}>
                           <div style={{ fontSize: 11, color: canSend ? def.color : "#333" }}>{def.icon} {def.label}</div>
                           <div style={{ fontSize: 7, color: canSend ? "#556" : "#222", marginTop: 2, lineHeight: 1.4 }}>{def.desc}</div>
-                          <div style={{ fontSize: 7, color: canSend ? "#883333" : "#222", marginTop: 3 }}>{def.colonistsRequired} colonist · {expedDuration}t · heat +{def.threatDelta}</div>
+                          <div style={{ fontSize: 7, color: canSend ? "#883333" : "#222", marginTop: 3 }}>
+                            {canSend
+                              ? `${expedCrewIds.length} crew · ${expedDuration}t · heat +${def.threatDelta}`
+                              : `needs exactly ${def.colonistsRequired} selected crew`}
+                          </div>
                         </button>
                       );
                     })}

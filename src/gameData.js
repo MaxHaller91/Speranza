@@ -361,10 +361,25 @@ function buildRollTable(exp, crew, condEffects) {
     if (col.traits?.includes("ghost")) scale("bad", 0.9);
   });
   if (exp.quirkBonuses?.surfaceBorn) scale("good", 1.2);
+  // Destination danger. SURFACE_LOCATIONS has carried rollMods since it was
+  // written but nothing ever read them, so every destination played identically.
+  const loc = exp.locationMods ?? {};
+  if (loc.badMult) scale("bad", loc.badMult);
   return table;
 }
 
 const ALL_SCHEMATICS = ["turretSchematics", "empSchematics", "fortSchematics", "geoSchematics", "researchSchematics"];
+
+/** Award an unclaimed schematic, if any remain. Mutates loot + claimed list. */
+function grantSchematic(updated, loot, claimed, rng, tickLabel, intents) {
+  const available = ALL_SCHEMATICS.filter(s => !claimed.includes(s));
+  if (available.length === 0) return;
+  const found = available[Math.floor(rng() * available.length)];
+  claimed.push(found);
+  loot.schematicFound = found;
+  updated.eventLog.push(`${tickLabel} 📋 SCHEMATIC FOUND — ${found}!`);
+  intents.push({ type: "toast", message: `📋 SCHEMATIC RECOVERED\n${found}\nCheck the build menu.`, kind: "success" });
+}
 
 /**
  * Advance every expedition by one tick.
@@ -422,21 +437,30 @@ export function advanceExpeditions(expeditions, ctx, rng = Math.random) {
         }
       } else if (typeof result === "object") {
         const loot = updated.lootAccumulated;
-        if (result.scrap)   loot.scrap   = (loot.scrap   || 0) + result.scrap   + (exp.quirkBonuses?.packRat ? 1 : 0);
-        if (result.salvage) loot.salvage = (loot.salvage || 0) + result.salvage + (exp.quirkBonuses?.packRat ? 1 : 0);
-        if (result.arcTech) loot.arcTech = (loot.arcTech || 0) + result.arcTech;
+        const loc  = exp.locationMods ?? {};
+        const mult = (v, m) => Math.max(1, Math.round(v * (m ?? 1)));
+        if (result.scrap)   loot.scrap   = (loot.scrap   || 0) + mult(result.scrap,   loc.scrapMult)   + (exp.quirkBonuses?.packRat ? 1 : 0);
+        if (result.salvage) loot.salvage = (loot.salvage || 0) + mult(result.salvage, loc.salvageMult) + (exp.quirkBonuses?.packRat ? 1 : 0);
+        if (result.arcTech) loot.arcTech = (loot.arcTech || 0) + mult(result.arcTech, loc.arcTechMult);
+        // The Greenhouse is the one place that grows anything — worth a run of
+        // its own now that running out of food actually kills people.
+        if (loc.foodBonus && result.scrap) loot.food = (loot.food || 0) + Math.round(result.scrap * 0.9);
         if (result.survivor) loot.survivor = true;
-        if (result.schematic) {
-          const available = ALL_SCHEMATICS.filter(s => !claimedSchematics.includes(s));
-          if (available.length > 0) {
-            const found = available[Math.floor(rng() * available.length)];
-            claimedSchematics.push(found);
-            loot.schematicFound = found;
-            updated.eventLog.push(`${tickLabel} 📋 SCHEMATIC FOUND — ${found}!`);
-            intents.push({ type: "toast", message: `📋 SCHEMATIC RECOVERED\n${found}\nCheck the build menu.`, kind: "success" });
-          }
-        }
+        if (result.schematic) grantSchematic(updated, loot, claimedSchematics, rng, tickLabel, intents);
         updated.eventLog.push(`${tickLabel} ${chatter(picked.type)}${picked.label}.`);
+      }
+
+      // Destination-specific extra chances, rolled once per outcome roll.
+      {
+        const loc = exp.locationMods ?? {};
+        const loot = updated.lootAccumulated;
+        if (loc.survivorChance && !loot.survivor && rng() < loc.survivorChance) {
+          loot.survivor = true;
+          updated.eventLog.push(`${tickLabel} 🧍 Someone is out here. Alive.`);
+        }
+        if (loc.schematicBonus && !loot.schematicFound && rng() < loc.schematicBonus) {
+          grantSchematic(updated, loot, claimedSchematics, rng, tickLabel, intents);
+        }
       }
       updated.rollCountdown = exp.rollEvery;
     }
@@ -444,17 +468,22 @@ export function advanceExpeditions(expeditions, ctx, rng = Math.random) {
     // ── Return ──
     if (updated.ticksLeft <= 0) {
       const loot = updated.lootAccumulated;
-      const hasGoodLoot = (loot.scrap || 0) > 0 || (loot.salvage || 0) > 0 || (loot.arcTech || 0) > 0;
+      const hasGoodLoot = (loot.scrap || 0) > 0 || (loot.salvage || 0) > 0
+                       || (loot.arcTech || 0) > 0 || (loot.food || 0) > 0;
       intents.push({ type: "trace", event: "expedition_returned", detail: updated.type });
       intents.push({ type: "collectLoot", loot });
       if (loot.survivor) intents.push({ type: "survivor" });
       // Only colonists still alive come home.
       intents.push({ type: "returnCrew", colonistIds: updated.colonistIds.filter(id => !removedIds.has(id)) });
+      const haul = [
+        loot.scrap   && `+${loot.scrap} scrap`,
+        loot.food    && `+${loot.food} food`,
+        loot.salvage && `+${loot.salvage} salvage`,
+        loot.arcTech && `+${loot.arcTech} arcTech`,
+      ].filter(Boolean).join(" · ");
       intents.push({
         type: "log",
-        text: `✅ Expedition returned. ${hasGoodLoot
-          ? `+${loot.scrap || 0} scrap${loot.salvage ? ` · +${loot.salvage} salvage` : ""}${loot.arcTech ? ` · +${loot.arcTech} arcTech` : ""}`
-          : "Empty-handed."}`,
+        text: `✅ ${updated.locationLabel ?? "Expedition"} run returned. ${hasGoodLoot ? haul : "Empty-handed."}`,
       });
       intents.push({
         type: "toast",
