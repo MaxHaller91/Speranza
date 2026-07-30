@@ -21,14 +21,57 @@ export const TICK_MS   = 4000;
 export const MAX_RES   = 300;
 
 // ─── Heat System ──────────────────────────────────────────────────────────────
+// Heat is the pacing driver: it climbs as the colony grows, raids fire off it,
+// and surviving one buys time. The intended rhythm is a sawtooth — build, get
+// noticed, get hit, get a breather — with each cycle arriving sooner than the
+// last because the colony is bigger.
 export const HEAT_MAX              = 1000;
 export const HEAT_BASE_GAIN        = 0.6;
 export const HEAT_GAIN_PER_ROOM    = 0.35;
 export const HEAT_DECAY_PER_TICK   = 0.3;
 export const HEAT_RAID_GAIN        = 15;
-export const HEAT_SENTRY_REDUCTION = 5;
-export const HEAT_RAID_PROB_BASE   = 0.15;
-export const HEAT_RAID_PROB_SCALE  = 0.25;
+
+// Sentries mitigate a PERCENTAGE of heat gain rather than a flat amount.
+// A flat -5/worker meant one fully-staffed Sentry Post (-10/tick) out-ran the
+// maximum possible gain from a completely full 28-cell grid, so building one
+// switched the raid system off for the rest of the run.
+export const HEAT_SENTRY_MITIGATION = 0.18; // per assigned sentry
+export const HEAT_SENTRY_MITIGATION_CAP = 0.60; // never fully suppressed
+
+// Raids roll every RAID_ROLL_EVERY ticks instead of only at midnight. Six
+// checks a day means the cadence responds to heat instead of being one binary
+// coin-flip per day that could leave 20 real minutes between raids.
+export const RAID_ROLL_EVERY       = 8;
+export const HEAT_RAID_PROB_BASE   = 0.05;  // ~1 raid / 3.3 days when unnoticed
+export const HEAT_RAID_PROB_SCALE  = 0.16;  // ~1 raid / 0.8 days when MARKED
+
+// Minimum ticks between raids, and the grace period on a fresh colony.
+// Weathering a bigger assault buys proportionally more quiet.
+export const RAID_COOLDOWN_TICKS   = 36;
+export const RAID_GRACE_TICKS      = 60;
+export const RAID_COOLDOWN_BY_SIZE = { small: 30, medium: 42, large: 60 };
+export const raidCooldownFor = (sizeKey) => RAID_COOLDOWN_BY_SIZE[sizeKey] ?? RAID_COOLDOWN_TICKS;
+
+// Fraction of current heat shed by surviving a raid / a barricade block. This
+// is what turns heat from a bar that pins at max forever into a real cycle.
+export const HEAT_RELIEF_RAID_SURVIVED = 0.35;
+export const HEAT_RELIEF_BARRICADE     = 0.15;
+
+/** Net heat change for one tick. Pure, so the tick loop stays testable. */
+export function calcHeatDelta({ builtRooms, sentryWorkers, threatMult = 1, suppressed = false }) {
+  if (suppressed) return -HEAT_DECAY_PER_TICK;
+  const gross = (HEAT_BASE_GAIN + builtRooms * HEAT_GAIN_PER_ROOM) * threatMult;
+  const mitigation = Math.min(
+    HEAT_SENTRY_MITIGATION_CAP,
+    sentryWorkers * HEAT_SENTRY_MITIGATION,
+  );
+  return gross * (1 - mitigation) - HEAT_DECAY_PER_TICK;
+}
+
+/** Chance of a raid opening on a single roll at this heat level. */
+export function calcRaidChance(heat) {
+  return HEAT_RAID_PROB_BASE + (heat / HEAT_MAX) * HEAT_RAID_PROB_SCALE;
+}
 
 export const HEAT_STATES = [
   { min: 0,   max: 199,  label: "UNDETECTED", color: "#7ed321" },
@@ -60,7 +103,7 @@ export const T2_TECHS = {
   },
   sentryPost: {
     label: "Sentry Post", icon: "🪖", cost: 75,
-    desc: "Unlocks the Sentry Post building. Each assigned colonist reduces Arc threat by 5/tick.",
+    desc: "Unlocks the Sentry Post building. Each assigned sentry cuts Arc heat gain by 18% (up to 60%). Sentries can never hide you completely.",
   },
   radioTower: {
     label: "Radio Tower", icon: "📡", cost: 75,
@@ -177,7 +220,7 @@ export const ROOM_TYPES = {
   sentryPost: {
     label: "Sentry Post",    icon: "🪖", color: "#e8d44d", bg: "#1a1500", border: "#e8d44d",
     cost: { scrap: 30 },    produces: {}, consumes: {}, cap: 2,
-    desc: "Each assigned sentry reduces Arc threat by 5/tick. Sentries can be targeted in raids.",
+    desc: "Each assigned sentry cuts Arc heat gain by 18%, up to a 60% cap. Sentries man the surface bunker and are exposed during raids.",
     special: "sentryPost", requiresTech: "sentryPost",
   },
   radioTower: {
@@ -291,6 +334,31 @@ export function applyMoraleModifier(table, moraleSnapshot) {
           : entry.type === "bad"  ? entry.weight / modifier
           : entry.weight,
   }));
+}
+
+// ─── Deprivation (starvation / dehydration) ──────────────────────────────────
+// Running out of food or water used to end the run instantly — one tick the
+// colony was fine, the next it was over, with no chance to react. It is now a
+// visible, escalating process: warning, then collapses, then deaths, and the
+// run only ends when the last colonist is gone.
+export const DEPRIVE_COLLAPSE_TICKS = 6;    // people start dropping
+export const DEPRIVE_DEATH_TICKS    = 16;   // people start dying
+export const DEPRIVE_COLLAPSE_CHANCE = 0.09;
+export const DEPRIVE_DEATH_CHANCE    = 0.07;
+export const DEPRIVE_MORALE_PER_TICK = -3;
+
+/** Ticks until a stock hits zero at this net rate. null when it isn't falling. */
+export function ticksToEmpty(amount, netPerTick) {
+  if (!(netPerTick < 0)) return null;
+  return Math.max(0, Math.ceil(amount / -netPerTick));
+}
+
+/** How dire things are, for both UI and tick-loop effects. */
+export function deprivationStage(deprivedTicks) {
+  if (deprivedTicks <= 0) return "none";
+  if (deprivedTicks < DEPRIVE_COLLAPSE_TICKS) return "warning";
+  if (deprivedTicks < DEPRIVE_DEATH_TICKS) return "collapsing";
+  return "dying";
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

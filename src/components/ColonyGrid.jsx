@@ -113,7 +113,7 @@ export default function ColonyGrid({
                         )}
                         {grid[r][c].damaged && <div style={{ color: "#ff8800", fontSize: 8, marginTop: 3 }}>⚠ DAMAGED — repair: 20 scrap</div>}
                         {def.special === "hospital"   && grid[r][c].workers > 0 && <div style={{ color: "#ff6b9d", fontSize: 8, marginTop: 2 }}>Treating up to {grid[r][c].workers * 3} patients</div>}
-                        {def.special === "sentryPost" && <div style={{ color: "#e8d44d", fontSize: 8, marginTop: 2 }}>-{grid[r][c].workers * 5} heat/tick</div>}
+                        {def.special === "sentryPost" && <div style={{ color: "#e8d44d", fontSize: 8, marginTop: 2 }}>-{Math.min(60, grid[r][c].workers * 18)}% heat gain</div>}
                         {!def.cap && !def.produces && <div style={{ color: "#556", fontSize: 8 }}>{def.desc}</div>}
                       </div>
                     )}

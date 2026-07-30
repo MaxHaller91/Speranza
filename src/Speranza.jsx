@@ -23,13 +23,19 @@ import {
 import {
   TICK_MS, MAX_RES,
   HEAT_MAX, HEAT_BASE_GAIN, HEAT_GAIN_PER_ROOM, HEAT_DECAY_PER_TICK,
-  HEAT_RAID_GAIN, HEAT_SENTRY_REDUCTION, HEAT_RAID_PROB_BASE, HEAT_RAID_PROB_SCALE,
+  HEAT_RAID_GAIN,
+  calcHeatDelta, calcRaidChance, RAID_ROLL_EVERY,
+  RAID_COOLDOWN_TICKS, RAID_GRACE_TICKS, raidCooldownFor,
+  HEAT_RELIEF_RAID_SURVIVED, HEAT_RELIEF_BARRICADE,
   getHeatState, INJURY_TICKS_BASE, HEAL_RATE_NURSE,
   RAID_SIZES, RAID_SIZE_ORDER, RAID_LAUNCH_CHANCE,
   T2_TECHS, TRAITS, TRAIT_KEYS,
   makeColonist, ROOM_TYPES, EXCAVATION_DEFS,
   EXPEDITION_TYPES, EXPEDITION_ROLL_TABLES, applyMoraleModifier,
   DRAIN_PER_COL, clamp, EMPTY_STAT_BREAKDOWN,
+  deprivationStage, ticksToEmpty,
+  DEPRIVE_COLLAPSE_TICKS, DEPRIVE_DEATH_TICKS,
+  DEPRIVE_COLLAPSE_CHANCE, DEPRIVE_DEATH_CHANCE, DEPRIVE_MORALE_PER_TICK,
   isSaveLockedByRaidState,
   calcColonyWealth, getWealthBracket,
   weightedTargetPick, initColonists, initGrid, INIT_RES,
@@ -52,6 +58,7 @@ import ColonistRoster from './components/ColonistRoster.jsx';
 import ColonyGrid     from './components/ColonyGrid.jsx';
 import SidePanel      from './components/SidePanel.jsx';
 import HelpModal      from './components/HelpModal.jsx';
+import CrisisBanner   from './components/CrisisBanner.jsx';
 
 export default function Speranza() {
   const [grid,       setGrid]       = useState(initGrid);
@@ -127,6 +134,9 @@ export default function Speranza() {
   const [recentDilemmaOutcomes, setRecentDilemmaOutcomes] = useState([]);
   const [historyLog,            setHistoryLog]            = useState([]);
   const [heatSuppressedTicks,   setHeatSuppressedTicks]   = useState(0);
+  // Consecutive ticks with food or water at zero. Drives the starvation stages.
+  const [deprivedTicks,         setDeprivedTicks]         = useState(0);
+  const deprivedTicksRef = useRef(0);
   const tickHistoryRef = useRef([]);
   const eventTraceRef = useRef([]);
   const currentTickToastTagsRef = useRef([]);
@@ -203,7 +213,7 @@ export default function Speranza() {
   useEffect(() => { firedDilemmasRef.current    = firedDilemmas;    }, [firedDilemmas]);
   useEffect(() => { heatSuppressedTicksRef.current = heatSuppressedTicks; }, [heatSuppressedTicks]);
   // Raid cooldown — starts at 48 (one in-game day) to block raids on fresh game
-  const raidCooldownTicksRef = useRef(48);
+  const raidCooldownTicksRef = useRef(RAID_GRACE_TICKS);
 
   // ── Assignment reconciler ────────────────────────────────────────────────
   // Single source of truth: a colonist's `assignedRoom` decides staffing, and
@@ -309,6 +319,7 @@ export default function Speranza() {
       recentDilemmaOutcomes,
       historyLog,
       heatSuppressedTicks,
+      deprivedTicks,
       dilemmaTimer,
       activeDilemma,
     };
@@ -338,6 +349,7 @@ export default function Speranza() {
       recentDilemmaOutcomes: s.recentDilemmaOutcomes,
       historyLog: s.historyLog,
       heatSuppressedTicks: s.heatSuppressedTicks,
+      deprivedTicks: s.deprivedTicks,
       dilemmaTimer: s.dilemmaTimer,
       activeDilemma: s.activeDilemma,
       activeRaid: null,
@@ -353,7 +365,7 @@ export default function Speranza() {
     raidsRepelled, largeRaidsRepelled, expeditionsCompleted,
     surfaceCondition, surfaceConditionTimer, peakPopulation,
     firedMilestones, firedDilemmas, recentDilemmaOutcomes,
-    historyLog, heatSuppressedTicks, dilemmaTimer, activeDilemma,
+    historyLog, heatSuppressedTicks, deprivedTicks, dilemmaTimer, activeDilemma,
   ]);
 
   const buildSavePayload = useCallback((source = null) => ({
@@ -607,6 +619,8 @@ export default function Speranza() {
       setRecentDilemmaOutcomes(Array.isArray(state.recentDilemmaOutcomes) ? state.recentDilemmaOutcomes : []);
       setHistoryLog(Array.isArray(state.historyLog) ? state.historyLog : []);
       setHeatSuppressedTicks(state.heatSuppressedTicks ?? 0);
+      setDeprivedTicks(state.deprivedTicks ?? 0);
+      deprivedTicksRef.current = state.deprivedTicks ?? 0;
       setDilemmaTimer(state.dilemmaTimer ?? 0);
       setActiveDilemma(state.activeDilemma ?? null);
 
@@ -761,6 +775,7 @@ export default function Speranza() {
         water: { ...EMPTY_STAT_BREAKDOWN },
       };
       const moraleTickBreakdown = { plus: [], minus: [], net: 0 };
+      let resAfterProduction = resRef.current;
 
       // 0. Passive morale ────────────────────────────────────────────────────
       {
@@ -912,20 +927,89 @@ export default function Speranza() {
 
         setNetFlow(flow);
         resourceBreakdownSnapshot = statReasons;
-        if (next.food <= 0 && next.water <= 0) {
-          const currentTick = tickRef.current;
-          const daysAlive = Math.floor(currentTick / 48) + 1;
-          setGameOver({
-            reason: "No food or water — colony collapsed.",
-            daysAlive,
-            tick: currentTick,
-            raidsRepelled: raidsRepelledRef.current,
-            casualties: memorialRef.current,
-            peakPop: peakPopulation,
-          });
-        }
+        // Deterministic snapshot so the deprivation pass below can read this
+        // tick's result. Deliberately no side effects here — this updater is
+        // double-invoked under StrictMode.
+        resAfterProduction = next;
         return next;
       });
+
+      // 1b. Deprivation — starvation / dehydration ──────────────────────────
+      // Empty stores no longer end the run on the spot. They start a clock: the
+      // colony gets loud warnings, then people collapse, then people die. The
+      // run ends when the last colonist is gone, which the population check
+      // below already handles.
+      {
+        const noFood  = resAfterProduction.food  <= 0;
+        const noWater = resAfterProduction.water <= 0;
+        const deprived = noFood || noWater;
+        const prevTicks = deprivedTicksRef.current;
+
+        if (deprived) {
+          const ticks = prevTicks + 1;
+          deprivedTicksRef.current = ticks;
+          setDeprivedTicks(ticks);
+          const stage = deprivationStage(ticks);
+          const lack = noFood && noWater ? "FOOD AND WATER"
+                     : noFood ? "FOOD" : "WATER";
+
+          changeMoraleRef.current(DEPRIVE_MORALE_PER_TICK, `no ${lack.toLowerCase()}`);
+
+          if (ticks === 1) {
+            addLog(`🚨 ${lack} EXHAUSTED — the colony is going without.`);
+            addToast(`🚨 ${lack} EXHAUSTED\nPeople will start collapsing in ${DEPRIVE_COLLAPSE_TICKS} ticks.\nFix production NOW.`, "raid", { key: "deprivation-start" });
+            playAlert();
+            addHistoryRef.current("🚨", `${lack} ran out`);
+          } else if (ticks === DEPRIVE_COLLAPSE_TICKS) {
+            addLog(`🚨 Colonists are collapsing from lack of ${lack.toLowerCase()}.`);
+            addToast(`🚨 COLONISTS COLLAPSING\nNo ${lack.toLowerCase()} for ${ticks} ticks.\nDeaths begin in ${DEPRIVE_DEATH_TICKS - ticks} ticks.`, "raid", { key: "deprivation-collapse" });
+            playAlert();
+          } else if (ticks === DEPRIVE_DEATH_TICKS) {
+            addLog(`💀 The colony is starting to die of ${noFood ? "hunger" : "thirst"}.`);
+            addToast(`💀 THE COLONY IS DYING\nNo ${lack.toLowerCase()} for ${ticks} ticks.\nColonists are dying now.`, "raid", { key: "deprivation-death" });
+            playAlert();
+          }
+
+          if (stage === "collapsing" || stage === "dying") {
+            // Healthy colonists drop first; they can still be saved by a hospital.
+            setColonists(prev => {
+              const upright = prev.filter(c => c.status !== "injured" && c.status !== "onExpedition");
+              if (upright.length === 0) return prev;
+              if (Math.random() >= DEPRIVE_COLLAPSE_CHANCE) return prev;
+              const victim = upright[Math.floor(Math.random() * upright.length)];
+              addLog(`⚕ ${victim.name} collapsed from ${noFood ? "hunger" : "thirst"}.`);
+              addToast(`⚕ ${victim.name} COLLAPSED\nFrom ${noFood ? "hunger" : "thirst"}.`, "injury", { debugTag: `deprivation_collapse_${victim.name}` });
+              playInjury();
+              return prev.map(c => c.id === victim.id
+                ? { ...c, status: "injured", assignedRoom: null,
+                    injuryTicksLeft: INJURY_TICKS_BASE, injuryCount: (c.injuryCount ?? 0) + 1 }
+                : c);
+            });
+          }
+
+          if (stage === "dying") {
+            setColonists(prev => {
+              if (prev.length === 0) return prev;
+              if (Math.random() >= DEPRIVE_DEATH_CHANCE) return prev;
+              // The already-collapsed go first — it reads as a consequence.
+              const pool = prev.filter(c => c.status === "injured");
+              const victim = (pool.length ? pool : prev)[Math.floor(Math.random() * (pool.length || prev.length))];
+              addToMemorialRef.current(victim, "moraleDeath", tickRef.current);
+              pushEventTrace("deprivation_death", victim.name, lack);
+              addLog(`💀 ${victim.name} died of ${noFood ? "starvation" : "thirst"}.`);
+              addToast(`💀 ${victim.name} DIED\nOf ${noFood ? "starvation" : "thirst"}.`, "raid", { debugTag: `deprivation_death_${victim.name}` });
+              playKill();
+              return prev.filter(c => c.id !== victim.id);
+            });
+          }
+        } else if (prevTicks > 0) {
+          deprivedTicksRef.current = 0;
+          setDeprivedTicks(0);
+          addLog("🍲 Stores are flowing again — the colony is eating.");
+          addToast("🍲 CRISIS OVER\nStores are flowing again.", "success", { key: "deprivation-over" });
+          changeMoraleRef.current(6, "the colony ate");
+        }
+      }
 
       // 2. Heat buildup + probabilistic raid trigger ──────────────────────────
       const builtRooms     = g.flatMap(row => row).filter(cell => cell.type).length;
@@ -949,7 +1033,7 @@ export default function Speranza() {
             setRaidFlash(true);
             setTimeout(() => setRaidFlash(false), 500);
             setRaidWindow(null);
-            setHeat(prev => clamp(prev - 40, 0, HEAT_MAX)); // barricade block slightly lowers heat
+            setHeat(prev => clamp(prev * (1 - HEAT_RELIEF_BARRICADE), 0, HEAT_MAX)); // a clean block buys a little quiet
             changeMoraleRef.current(10, "barricades held");
             playBarricadesHold();
           } else {
@@ -991,37 +1075,45 @@ export default function Speranza() {
         }));
         // Decrement raid cooldown each tick; blocks raid window from opening
         if (raidCooldownTicksRef.current > 0) raidCooldownTicksRef.current--;
-        setHeat(prev => {
-          const gain    = heatGainSuppressed ? 0 : (HEAT_BASE_GAIN + builtRooms * HEAT_GAIN_PER_ROOM) * condThreatMult;
-          const sentry  = sentryCount * HEAT_SENTRY_REDUCTION;
-          const next    = clamp(prev + gain - HEAT_DECAY_PER_TICK - sentry, 0, HEAT_MAX);
-          // Probability-based raid trigger
-          const raidChance = HEAT_RAID_PROB_BASE + (next / HEAT_MAX) * HEAT_RAID_PROB_SCALE;
-          const condRaidMult = surfaceConditionRef.current.effects.raidFreqMult ?? 1.0;
-          if (tickRef.current % 48 === 0 && raidCooldownTicksRef.current <= 0 && Math.random() < raidChance * condRaidMult) {
-            // Determine starting size based on heat state
-            const hState = getHeatState(next);
-            const wealth = calcColonyWealth(resRef.current, gridRef.current, colonistsRef.current);
-            const wealthBracket = getWealthBracket(wealth);
-            let sizeIdx = 0;
-            if (wealthBracket === 1) sizeIdx = Math.random() < 0.25 ? 1 : 0;
-            if (wealthBracket === 2) sizeIdx = Math.random() < 0.25 ? 2 : 1;
-            if (wealthBracket === 3) sizeIdx = Math.random() < 0.50 ? 2 : 1;
-            if (hState.label === "MARKED" && sizeIdx < 2) sizeIdx = Math.min(sizeIdx + 1, 2);
-            setRaidWindow({ sizeIdx, escalations: 0, wealthBracket });
-            pushEventTrace("raid_window_opened", null, RAID_SIZE_ORDER[sizeIdx]);
-            const hLabel = hState.label;
-            const wealthLabels = ["STRUGGLING", "ESTABLISHED", "PROSPEROUS", "WEALTHY"];
-            addLog(`☢ ${hLabel === "MARKED" ? "⚠ MARKED — " : ""}Arc forces detected — raid incoming! [${wealthLabels[wealthBracket]}]`);
-            const sensitives = cols.filter(c => c.quirk?.id === "arcSensitive");
-            if (sensitives.length > 0 && Math.random() < 0.2) {
-              const warnCol = sensitives[Math.floor(Math.random() * sensitives.length)];
-              addLog(`🔮 ${warnCol.name}'s instincts are firing. Something is coming.`);
-            }
-            addToast(`☢ ARC HEAT: ${hLabel}\nRaid incoming — stay alert.`, "injury", { key: `heat-raid-incoming-${hLabel}` });
-          }
-          return next;
+
+        const heatDelta = calcHeatDelta({
+          builtRooms,
+          sentryWorkers: sentryCount,
+          threatMult: condThreatMult,
+          suppressed: heatGainSuppressed,
         });
+        const nextHeat = clamp(heatRef.current + heatDelta, 0, HEAT_MAX);
+        setHeat(nextHeat);
+
+        // The raid roll lives OUT here on purpose. It used to sit inside the
+        // setHeat updater, which StrictMode double-invokes in dev — so the roll
+        // ran twice per tick and every announcement fired twice. That was the
+        // "raid toast fires twice" bug; it was never a missing dedupe guard.
+        const condRaidMult = surfaceConditionRef.current.effects.raidFreqMult ?? 1.0;
+        const dueToRoll    = tickRef.current % RAID_ROLL_EVERY === 0;
+        if (dueToRoll && raidCooldownTicksRef.current <= 0 &&
+            Math.random() < calcRaidChance(nextHeat) * condRaidMult) {
+          // Determine starting size based on heat state
+          const hState = getHeatState(nextHeat);
+          const wealth = calcColonyWealth(resRef.current, gridRef.current, colonistsRef.current);
+          const wealthBracket = getWealthBracket(wealth);
+          let sizeIdx = 0;
+          if (wealthBracket === 1) sizeIdx = Math.random() < 0.25 ? 1 : 0;
+          if (wealthBracket === 2) sizeIdx = Math.random() < 0.25 ? 2 : 1;
+          if (wealthBracket === 3) sizeIdx = Math.random() < 0.50 ? 2 : 1;
+          if (hState.label === "MARKED" && sizeIdx < 2) sizeIdx = Math.min(sizeIdx + 1, 2);
+          setRaidWindow({ sizeIdx, escalations: 0, wealthBracket });
+          pushEventTrace("raid_window_opened", null, RAID_SIZE_ORDER[sizeIdx]);
+          const hLabel = hState.label;
+          const wealthLabels = ["STRUGGLING", "ESTABLISHED", "PROSPEROUS", "WEALTHY"];
+          addLog(`☢ ${hLabel === "MARKED" ? "⚠ MARKED — " : ""}Arc forces detected — raid incoming! [${wealthLabels[wealthBracket]}]`);
+          const sensitives = cols.filter(c => c.quirk?.id === "arcSensitive");
+          if (sensitives.length > 0 && Math.random() < 0.2) {
+            const warnCol = sensitives[Math.floor(Math.random() * sensitives.length)];
+            addLog(`🔮 ${warnCol.name}'s instincts are firing. Something is coming.`);
+          }
+          addToast(`☢ ARC HEAT: ${hLabel}\nRaid incoming — stay alert.`, "injury", { key: `heat-raid-incoming-${hLabel}` });
+        }
       }
 
       // 2b. Active raid countdown + periodic strikes ────────────────────────
@@ -1186,7 +1278,7 @@ export default function Speranza() {
         if (newTicksLeft <= 0) {
           setActiveRaid(null);
           setColonists(prev => prev.map(c => ({ ...c, raidsSurvived: (c.raidsSurvived ?? 0) + 1 })));
-          setHeat(prev => clamp(prev - 30, 0, HEAT_MAX)); // raid ending reduces heat slightly
+          setHeat(prev => clamp(prev * (1 - HEAT_RELIEF_RAID_SURVIVED), 0, HEAT_MAX)); // surviving buys real breathing room
           unduckMusic();
           addLog(`✅ ${sizeDef.label} raid repelled — Arc forces withdrew.`);
           addToast(`✅ RAID OVER\n${sizeDef.label} Arc forces withdrew.\nThreat level reset.`, "success", { key: `raid-over-${sizeDef.label}` });
@@ -1811,11 +1903,11 @@ export default function Speranza() {
     setPendingWealthBracket(0);
     setRaidWindow(null);
     setActiveRaid(null);
-    raidCooldownTicksRef.current = 48; // one in-game day cooldown before next raid can open
+    raidCooldownTicksRef.current = raidCooldownFor(wonSize);
     unduckMusic();
     playRaidOver();
     setColonists(prev => prev.map(c => ({ ...c, raidsSurvived: (c.raidsSurvived ?? 0) + 1 })));
-    setHeat(prev => clamp(prev - 60, 0, HEAT_MAX));
+    setHeat(prev => clamp(prev * (1 - HEAT_RELIEF_RAID_SURVIVED), 0, HEAT_MAX));
     changeMoraleRef.current(8, "raid repelled on surface");
     addLog("⚔ Surface defenses held — raid repelled before breach!");
     addToast("🛡 RAID REPELLED\nSurface defenses eliminated all Arc units.\nColony secure.", "success", { key: `surface-win-${tickRef.current}` });
@@ -1843,10 +1935,13 @@ export default function Speranza() {
   };
   const handleSurfaceRaidLost = () => {
     pushEventTrace("raid_resolved_lost", null, null);
+    const lostSize = pendingRaidSize;
     setSurfaceDefenseActive(false);
     setPendingRaidSize(null);
     setPendingWealthBracket(0);
-    raidCooldownTicksRef.current = 48; // one in-game day cooldown before next raid can open
+    // The breach still has to play out underground, so the cooldown only starts
+    // counting once that finishes — but the timer is set from the same table.
+    raidCooldownTicksRef.current = raidCooldownFor(lostSize);
     unduckMusic();
     addLog("⚠ Surface defenses breached — Arc forces entering colony.");
   };
@@ -2088,6 +2183,9 @@ export default function Speranza() {
     setDilemmaTimer(0);
     setFiredDilemmas([]);
     setHistoryLog([]);
+    setDeprivedTicks(0);
+    deprivedTicksRef.current = 0;
+    raidCooldownTicksRef.current = RAID_GRACE_TICKS;
     raidSuppressedThisRaidRef.current = 0;
     tickHistoryRef.current = [];
     eventTraceRef.current = [];
@@ -2175,6 +2273,8 @@ export default function Speranza() {
         onOpenHelp={() => { setHelpPage(0); setHelpOpen(true); }}
       />
 
+      <CrisisBanner res={res} netFlow={netFlow} deprivedTicks={deprivedTicks} />
+
       <RaidBanner
         activeRaid={activeRaid}
         raidWindow={raidWindow}
@@ -2246,6 +2346,7 @@ export default function Speranza() {
           />
 
           <FlowPanel
+            res={res}
             netFlow={netFlow}
             statBreakdown={statBreakdown}
             mousePos={mousePos}

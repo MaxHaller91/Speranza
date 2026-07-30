@@ -1,7 +1,16 @@
 // FlowPanel.jsx — supply/demand net flow bars with hover breakdown
-// Props: netFlow, statBreakdown, mousePos, hoveredFlowStat, onHoverFlowStat
+// Props: res, netFlow, statBreakdown, mousePos, hoveredFlowStat, onHoverFlowStat
+import { ticksToEmpty } from "../gameData.js";
 
-export default function FlowPanel({ netFlow, statBreakdown, mousePos, hoveredFlowStat, onHoverFlowStat }) {
+export default function FlowPanel({ res, netFlow, statBreakdown, mousePos, hoveredFlowStat, onHoverFlowStat }) {
+  // A falling stock is the single most important thing on this panel, and it
+  // used to be invisible until the moment the colony died. Show the countdown.
+  const runway = (key) => {
+    if (key === "morale" || !res) return null;
+    const t = ticksToEmpty(res[key] ?? 0, netFlow[key] ?? 0);
+    if (t === null) return null;
+    return { ticks: t, days: t / 48 };
+  };
   const renderBreakdownLines = (lines, emptyLabel, color) => {
     if (!lines.length) {
       return <div style={{ color, opacity: 0.7, fontSize: 8, lineHeight: 1.4 }}>• {emptyLabel}</div>;
@@ -49,9 +58,28 @@ export default function FlowPanel({ netFlow, statBreakdown, mousePos, hoveredFlo
             <div style={{ width: 36, textAlign: "right", fontSize: 10, fontFamily: "monospace", flexShrink: 0, fontWeight: "bold", color: crit ? "#ff4444" : surplus ? color : "#ff7755" }}>
               {val > 0 ? `+${val.toFixed(1)}` : val.toFixed(1)}
             </div>
+            {/* Time-to-empty countdown — the warning the old UI never gave. */}
+            {(() => {
+              const rw = runway(key);
+              if (!rw) return <div style={{ width: 62, flexShrink: 0 }} />;
+              const urgent = rw.ticks <= 24;   // half a day or less
+              const soon   = rw.ticks <= 72;   // a day and a half
+              return (
+                <div style={{
+                  width: 62, flexShrink: 0, textAlign: "right",
+                  fontSize: 8, fontFamily: "monospace",
+                  color: urgent ? "#ff4444" : soon ? "#ff9944" : "#5a6a7a",
+                  fontWeight: urgent ? "bold" : "normal",
+                  animation: urgent ? "flowPulse 1s infinite" : "none",
+                }}>
+                  {rw.ticks <= 0 ? "EMPTY" : `${rw.ticks}t left`}
+                </div>
+              );
+            })()}
           </div>
         );
       })}
+      <style>{`@keyframes flowPulse { 0%,100%{opacity:1} 50%{opacity:0.35} }`}</style>
 
       {/* Hover breakdown tooltip */}
       {hoveredFlowStat && statBreakdown[hoveredFlowStat] && (() => {

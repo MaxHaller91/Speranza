@@ -87,8 +87,15 @@ The memorial side panel is accessible without the memorial building being built.
 Colonist levels are not displaying correctly on the game over screen.
 
 ### Surface Defense — Incomplete Integration with Main Raid System
-The surface defense minigame (`surface_defense.jsx`) is not fully integrated with Speranza's raid lifecycle. Remaining confirmed issue from bug report tick-306:
-1. Raid toast notification fires twice in the same tick when a raid launches — likely no deduplication guard on the announcement.
+The surface defense minigame (`surface_defense.jsx`) is not fully integrated with Speranza's raid lifecycle.
+
+~~1. Raid toast notification fires twice in the same tick when a raid launches — likely no deduplication guard on the announcement.~~
+**FIXED (opus-5 branch).** The cause was not a missing dedupe guard. The raid
+roll — `Math.random()`, `setRaidWindow`, `addLog`, `addToast` — lived *inside* a
+`setHeat(prev => ...)` updater. `main.jsx` renders under `StrictMode`, which
+double-invokes state updaters in development, so the whole roll ran twice per
+tick and every announcement fired twice. The roll now happens outside the
+updater. Keep side effects out of state updaters.
 
 Do not touch this system without reading `systemPatterns.md` (Heat → Raid Pipeline section) and understanding the full `activeRaid` / `surfaceDefenseActive` / `raidWindow` state handoff first.
 
@@ -101,9 +108,16 @@ The new-defense step in `Raid Improvements/STEP_5_new_defenses.md` is intentiona
 #### Surface Defense Lifecycle Safety
 - RAF loop continues to run while inactive, creating background CPU churn.
 
-#### Worker/Status Consistency (Main Loop + Handlers)
-- Potential worker ↔ colonist state desync in edge paths: room worker counts can diverge from which specific colonists are transitioned between statuses.
-- Alarm/sentry transitions can produce impossible combinations (e.g., status implying active sentry duty while room worker counts are reset).
+#### Worker/Status Consistency (Main Loop + Handlers) — RESOLVED (opus-5 branch)
+Root cause: `cell.workers` was a standalone count with no link to *which*
+colonist was in the room, so every removal path picked a random staffed room.
+
+Colonists now own `assignedRoom`, and `cell.workers` is a derived mirror kept
+honest by a reconciler effect in `Speranza.jsx` (`pruneInvalidAssignments` +
+`reconcileGridWorkers`, both identity-preserving so the effect converges).
+
+**Rule: never write `cell.workers` directly.** Change the colonist's
+`assignedRoom` and let the reconciler update the count.
 
 #### UI Data Accuracy
 - `ColonyGrid` room tooltip can show staffed production/consumption values when a staffed room has zero workers.

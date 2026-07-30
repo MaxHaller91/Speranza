@@ -6,7 +6,7 @@
 //        onTimescale, onMusicVolume, onRecruit, onToggleJournal, onToggleEffects,
 //        onHoverMorale, onBugReport, saveLocked, saveLockReason,
 //        onSaveNow, onLoadAutosave, onExportSave, onImportSave, onDeleteAutosaves
-import { MAX_RES, HEAT_MAX, HEAT_RAID_PROB_BASE, HEAT_RAID_PROB_SCALE, RAID_SIZES, RAID_SIZE_ORDER, tickToDayHour } from "../gameData.js";
+import { MAX_RES, HEAT_MAX, calcRaidChance, RAID_ROLL_EVERY, RAID_SIZES, RAID_SIZE_ORDER, tickToDayHour } from "../gameData.js";
 
 function ResBar({ k, icon, label, color, res }) {
   return (
@@ -232,7 +232,9 @@ export default function ColonyHeader({
             </div>
           ) : (
             <div style={{ fontSize: 8, color: "#2a4a6a" }}>
-              {Math.floor(heat)}/1000 · {Math.round(HEAT_RAID_PROB_BASE * 100 + (heat / HEAT_MAX) * HEAT_RAID_PROB_SCALE * 100)}% raid chance/day
+              {/* Raids roll every RAID_ROLL_EVERY ticks, so surface the odds of
+                  being hit at all today rather than a single roll's chance. */}
+              {Math.floor(heat)}/1000 · {Math.round((1 - Math.pow(1 - calcRaidChance(heat), 48 / RAID_ROLL_EVERY)) * 100)}% raid chance/day
               {unlockedTechs.includes("barricades") && " · 🛡 Barricades active"}
             </div>
           )}

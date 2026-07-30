@@ -325,7 +325,7 @@ export default function SidePanel({
                   <div style={{ color: "#5a5020", fontSize: 8 }}>No sentries assigned.</div>
                 ) : (<>
                   <div style={{ color: "#c8d0d8", fontSize: 9 }}>🪖 {selCell.workers} sentry{selCell.workers > 1 ? "ies" : ""} active</div>
-                  <div style={{ color: "#e8d44d", fontSize: 8, marginTop: 3 }}>-{selCell.workers * 5} heat/tick</div>
+                  <div style={{ color: "#e8d44d", fontSize: 8, marginTop: 3 }}>-{Math.min(60, selCell.workers * 18)}% heat gain</div>
                   <div style={{ color: "#5a5020", fontSize: 7, marginTop: 2 }}>Sentries are exposed during raids.</div>
                 </>)}
               </div>
