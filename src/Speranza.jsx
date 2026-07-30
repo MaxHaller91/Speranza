@@ -137,6 +137,12 @@ export default function Speranza() {
   // Consecutive ticks with food or water at zero. Drives the starvation stages.
   const [deprivedTicks,         setDeprivedTicks]         = useState(0);
   const deprivedTicksRef = useRef(0);
+  // Mirrors for timers/flags the tick loop advances directly, now that those
+  // rolls happen in the loop body instead of inside state updaters.
+  const surfaceConditionTimerRef = useRef(0);
+  const surfaceRotateAtRef       = useRef(80 + Math.floor(Math.random() * 41));
+  const dilemmaTimerRef          = useRef(0);
+  const activeDilemmaRef         = useRef(null);
   const tickHistoryRef = useRef([]);
   const eventTraceRef = useRef([]);
   const currentTickToastTagsRef = useRef([]);
@@ -211,6 +217,9 @@ export default function Speranza() {
   useEffect(() => { surfaceConditionRef.current = surfaceCondition; }, [surfaceCondition]);
   useEffect(() => { heatRef.current             = heat;             }, [heat]);
   useEffect(() => { firedDilemmasRef.current    = firedDilemmas;    }, [firedDilemmas]);
+  useEffect(() => { activeDilemmaRef.current    = activeDilemma;    }, [activeDilemma]);
+  useEffect(() => { surfaceConditionTimerRef.current = surfaceConditionTimer; }, [surfaceConditionTimer]);
+  useEffect(() => { dilemmaTimerRef.current     = dilemmaTimer;     }, [dilemmaTimer]);
   useEffect(() => { heatSuppressedTicksRef.current = heatSuppressedTicks; }, [heatSuppressedTicks]);
   // Raid cooldown — starts at 48 (one in-game day) to block raids on fresh game
   const raidCooldownTicksRef = useRef(RAID_GRACE_TICKS);
@@ -970,37 +979,34 @@ export default function Speranza() {
             playAlert();
           }
 
+          // Roll and pick the victim OUT here, then hand the updater a pure
+          // transform. Rolling inside the updater would fire twice per tick
+          // under StrictMode — doubling the real collapse/death rate.
           if (stage === "collapsing" || stage === "dying") {
-            // Healthy colonists drop first; they can still be saved by a hospital.
-            setColonists(prev => {
-              const upright = prev.filter(c => c.status !== "injured" && c.status !== "onExpedition");
-              if (upright.length === 0) return prev;
-              if (Math.random() >= DEPRIVE_COLLAPSE_CHANCE) return prev;
+            const upright = cols.filter(c => c.status !== "injured" && c.status !== "onExpedition");
+            if (upright.length > 0 && Math.random() < DEPRIVE_COLLAPSE_CHANCE) {
               const victim = upright[Math.floor(Math.random() * upright.length)];
+              setColonists(prev => prev.map(c => c.id === victim.id
+                ? { ...c, status: "injured", assignedRoom: null,
+                    injuryTicksLeft: INJURY_TICKS_BASE, injuryCount: (c.injuryCount ?? 0) + 1 }
+                : c));
               addLog(`⚕ ${victim.name} collapsed from ${noFood ? "hunger" : "thirst"}.`);
               addToast(`⚕ ${victim.name} COLLAPSED\nFrom ${noFood ? "hunger" : "thirst"}.`, "injury", { debugTag: `deprivation_collapse_${victim.name}` });
               playInjury();
-              return prev.map(c => c.id === victim.id
-                ? { ...c, status: "injured", assignedRoom: null,
-                    injuryTicksLeft: INJURY_TICKS_BASE, injuryCount: (c.injuryCount ?? 0) + 1 }
-                : c);
-            });
+            }
           }
 
-          if (stage === "dying") {
-            setColonists(prev => {
-              if (prev.length === 0) return prev;
-              if (Math.random() >= DEPRIVE_DEATH_CHANCE) return prev;
-              // The already-collapsed go first — it reads as a consequence.
-              const pool = prev.filter(c => c.status === "injured");
-              const victim = (pool.length ? pool : prev)[Math.floor(Math.random() * (pool.length || prev.length))];
-              addToMemorialRef.current(victim, "moraleDeath", tickRef.current);
-              pushEventTrace("deprivation_death", victim.name, lack);
-              addLog(`💀 ${victim.name} died of ${noFood ? "starvation" : "thirst"}.`);
-              addToast(`💀 ${victim.name} DIED\nOf ${noFood ? "starvation" : "thirst"}.`, "raid", { debugTag: `deprivation_death_${victim.name}` });
-              playKill();
-              return prev.filter(c => c.id !== victim.id);
-            });
+          if (stage === "dying" && cols.length > 0 && Math.random() < DEPRIVE_DEATH_CHANCE) {
+            // The already-collapsed go first — it reads as a consequence.
+            const pool = cols.filter(c => c.status === "injured");
+            const from = pool.length ? pool : cols;
+            const victim = from[Math.floor(Math.random() * from.length)];
+            setColonists(prev => prev.filter(c => c.id !== victim.id));
+            addToMemorialRef.current(victim, "moraleDeath", tickRef.current);
+            pushEventTrace("deprivation_death", victim.name, lack);
+            addLog(`💀 ${victim.name} died of ${noFood ? "starvation" : "thirst"}.`);
+            addToast(`💀 ${victim.name} DIED\nOf ${noFood ? "starvation" : "thirst"}.`, "raid", { debugTag: `deprivation_death_${victim.name}` });
+            playKill();
           }
         } else if (prevTicks > 0) {
           deprivedTicksRef.current = 0;
@@ -1463,13 +1469,19 @@ export default function Speranza() {
         if (cell.type === "hospital") nursesAvailable += cell.workers;
       }));
 
-      setColonists(prev => {
+      // Work out the healing result first, then apply it as a pure patch map.
+      // Announcing from inside the updater double-logged every recovery under
+      // StrictMode. The maths here is deterministic, so computing it up front
+      // changes nothing about the outcome.
+      const healPatches = new Map();
+      const recoveries  = [];
+      {
         let nurseCapacity = nursesAvailable * 3; // each nurse handles up to 3 patients
         // Seats already taken, so a recovering colonist only reclaims their old
         // post if it still exists and nobody filled in for them.
-        const seats = occupiedSeats(prev);
-        return prev.map(col => {
-          if (col.status !== "injured") return col;
+        const seats = occupiedSeats(cols);
+        cols.forEach(col => {
+          if (col.status !== "injured") return;
           // IRON LUNGS: heals 2× faster
           const baseHeal = nurseCapacity > 0 ? (nurseCapacity--, HEAL_RATE_NURSE) : 1;
           let healRate = col.traits?.includes("ironLungs") ? baseHeal * 2 : baseHeal;
@@ -1479,64 +1491,67 @@ export default function Speranza() {
           const newTicks = (col.injuryTicksLeft ?? INJURY_TICKS_BASE) - healRate;
           if (newTicks <= 0) {
             const { room, ...patch } = reclaimPost(col, g, seats);
-            playSuccess();
-            if (room) {
-              addLog(`💊 ${col.name} has recovered and returned to the ${room.label}.`);
-              addToast(`💊 RECOVERED\n${col.name} is back at their post.`, "success");
-            } else {
-              addLog(`💊 ${col.name} has recovered and is awaiting assignment.`);
-              addToast(`💊 RECOVERED\n${col.name} is back on their feet — reassign them.`, "success");
-            }
-            return { ...col, ...patch, injuryTicksLeft: 0 };
+            healPatches.set(col.id, { ...patch, injuryTicksLeft: 0 });
+            recoveries.push({ name: col.name, room });
+          } else {
+            healPatches.set(col.id, { injuryTicksLeft: newTicks });
           }
-          return { ...col, injuryTicksLeft: newTicks };
         });
+      }
+
+      if (healPatches.size > 0) setColonists(prev => prev.map(col => {
+        const patch = healPatches.get(col.id);
+        return (patch && col.status === "injured") ? { ...col, ...patch } : col;
+      }));
+
+      recoveries.forEach(({ name, room }) => {
+        playSuccess();
+        if (room) {
+          addLog(`💊 ${name} has recovered and returned to the ${room.label}.`);
+          addToast(`💊 RECOVERED\n${name} is back at their post.`, "success", { debugTag: `recovered_${name}` });
+        } else {
+          addLog(`💊 ${name} has recovered and is awaiting assignment.`);
+          addToast(`💊 RECOVERED\n${name} is back on their feet — reassign them.`, "success", { debugTag: `recovered_${name}` });
+        }
       });
 
       // 4b. Morale collapse / strained mechanics ───────────────────────────
+      // Pick the victim before touching state; the updater stays a pure map.
       if (moraleRef.current <= -100) {
         // 10% chance per tick a colonist deserts
-        if (Math.random() < 0.10) {
-          setColonists(prev => {
-            const vulnerable = prev.filter(c => c.status === "idle" || c.status === "working");
-            if (vulnerable.length === 0) return prev;
-            const deserter = vulnerable[Math.floor(Math.random() * vulnerable.length)];
-            pushEventTrace("morale_death", deserter.name, "deserted");
-            setMorale(p => clamp(p - 15, -100, 100));
-            addLog(`🚪 ${deserter.name} has deserted — morale has collapsed.`);
-            addToast(`🚪 DESERTION\n${deserter.name} left the colony.\nMorale has completely collapsed.`, "raid");
-            return prev.filter(c => c.id !== deserter.id);
-          });
+        const vulnerable = cols.filter(c => c.status === "idle" || c.status === "working");
+        if (vulnerable.length > 0 && Math.random() < 0.10) {
+          const deserter = vulnerable[Math.floor(Math.random() * vulnerable.length)];
+          setColonists(prev => prev.filter(c => c.id !== deserter.id));
+          pushEventTrace("morale_death", deserter.name, "deserted");
+          changeMoraleRef.current(-15, "desertion");
+          addLog(`🚪 ${deserter.name} has deserted — morale has collapsed.`);
+          addToast(`🚪 DESERTION\n${deserter.name} left the colony.\nMorale has completely collapsed.`, "raid", { debugTag: `desertion_${deserter.name}` });
         }
       } else if (moraleRef.current < 0 && moraleRef.current > -50) {
         // 5% chance a working colonist refuses their post
-        if (Math.random() < 0.05) {
-          setColonists(prev => {
-            const working = prev.filter(c => c.status === "working");
-            if (working.length === 0) return prev;
-            const refuser = working[Math.floor(Math.random() * working.length)];
-            addLog(`😤 ${refuser.name} refused their post — morale is strained.`);
-            // They walk off their own post; the reconciler updates that cell.
-            return prev.map(c => c.id === refuser.id ? { ...c, status: "idle", assignedRoom: null } : c);
-          });
+        const working = cols.filter(c => c.status === "working");
+        if (working.length > 0 && Math.random() < 0.05) {
+          const refuser = working[Math.floor(Math.random() * working.length)];
+          // They walk off their own post; the reconciler updates that cell.
+          setColonists(prev => prev.map(c => c.id === refuser.id ? { ...c, status: "idle", assignedRoom: null } : c));
+          addLog(`😤 ${refuser.name} refused their post — morale is strained.`);
         }
       }
 
-      // Check population = 0 → game over
-      setColonists(prev => {
-        if (prev.length === 0 && !gameOverRef.current) {
-          const currentTick = tickRef.current;
-          setGameOver({
-            reason: "All colonists lost — the colony is silent.",
-            daysAlive: Math.floor(currentTick / 48) + 1,
-            tick: currentTick,
-            raidsRepelled: raidsRepelledRef.current,
-            casualties: memorialRef.current,
-            peakPop: peakPopulation,
-          });
-        }
-        return prev;
-      });
+      // Check population = 0 → game over. Read the ref rather than peeking
+      // inside an updater, which StrictMode would run twice.
+      if (colonistsRef.current.length === 0 && !gameOverRef.current) {
+        const currentTick = tickRef.current;
+        setGameOver({
+          reason: "All colonists lost — the colony is silent.",
+          daysAlive: Math.floor(currentTick / 48) + 1,
+          tick: currentTick,
+          raidsRepelled: raidsRepelledRef.current,
+          casualties: memorialRef.current,
+          peakPop: peakPopulation,
+        });
+      }
       // All living colonists age. On-duty colonists earn 1 XP per 10 duty ticks.
       // Level up every 20 XP → pendingTraitPick flag set.
       setColonists(prev => prev.map(col => {
@@ -1629,51 +1644,6 @@ export default function Speranza() {
         const next = t + 1;
         // Track peak population
         setPeakPopulation(prev => Math.max(prev, colonistsRef.current.length));
-        // Surface condition rotation — every 80-120 ticks (weighted random pick)
-        setSurfaceConditionTimer(prev => {
-          const nextTimer = prev + 1;
-          const rotateAt = 80 + Math.floor(Math.random() * 41); // 80-120
-          if (nextTimer >= rotateAt) {
-            const totalWeight = SURFACE_CONDITIONS.reduce((s, c) => s + c.weight, 0);
-            let r = Math.random() * totalWeight;
-            let next = SURFACE_CONDITIONS[0];
-            for (const cond of SURFACE_CONDITIONS) { r -= cond.weight; if (r <= 0) { next = cond; break; } }
-            setSurfaceCondition(next);
-            addLog(`🌍 SURFACE CONDITION: ${next.icon} ${next.label} — ${next.flavor}`);
-            playSurfaceCondition();
-            return 0;
-          }
-          return nextTimer;
-        });
-        // Dilemma event check — every 50 ticks, 40% chance if none active
-        setDilemmaTimer(prev => {
-          const nextDt = prev + 1;
-          if (nextDt >= 50 && !activeDilemma) {
-            if (Math.random() < 0.40) {
-              const currentTick = next;
-              const currentCond = surfaceConditionRef.current.id;
-              const popNow      = colonistsRef.current.length;
-              const eligible    = DILEMMA_EVENTS.filter(ev => {
-                if (firedDilemmasRef.current.includes(ev.id)) return false;
-                if (ev.minTick && currentTick < ev.minTick) return false;
-                if (ev.minPop  && popNow < ev.minPop)       return false;
-                if (ev.condition && ev.condition !== currentCond) return false;
-                return true;
-              });
-              if (eligible.length > 0) {
-                const picked = eligible[Math.floor(Math.random() * eligible.length)];
-                setActiveDilemma(picked);
-                pushEventTrace("dilemma_fired", null, picked.id, next);
-                setTimescale(0);
-                playDilemma();
-                setFiredDilemmas(p => [...p, picked.id]);
-                firedDilemmasRef.current = [...firedDilemmasRef.current, picked.id];
-              }
-            }
-            return 0;
-          }
-          return nextDt;
-        });
         checkMilestonesRef.current({
           raidsRepelled:        raidsRepelledRef.current,
           largeRaidsRepelled:   largeRaidsRepelledRef.current,
@@ -1687,6 +1657,64 @@ export default function Speranza() {
         });
         return next;
       });
+
+      // Surface condition rotation and dilemma checks used to live inside
+      // setSurfaceConditionTimer / setDilemmaTimer updaters, rolling dice and
+      // firing sound + log + modal from inside them. StrictMode ran all of that
+      // twice per tick. They now run once, here, off refs.
+      {
+        const nextTick = tickRef.current + 1;
+
+        // Surface condition rotation — every 80-120 ticks (weighted random pick)
+        const rotateAt = surfaceRotateAtRef.current;
+        const nextTimer = surfaceConditionTimerRef.current + 1;
+        if (nextTimer >= rotateAt) {
+          const totalWeight = SURFACE_CONDITIONS.reduce((s, c) => s + c.weight, 0);
+          let r = Math.random() * totalWeight;
+          let picked = SURFACE_CONDITIONS[0];
+          for (const cond of SURFACE_CONDITIONS) { r -= cond.weight; if (r <= 0) { picked = cond; break; } }
+          setSurfaceCondition(picked);
+          addLog(`🌍 SURFACE CONDITION: ${picked.icon} ${picked.label} — ${picked.flavor}`);
+          playSurfaceCondition();
+          surfaceConditionTimerRef.current = 0;
+          surfaceRotateAtRef.current = 80 + Math.floor(Math.random() * 41);
+          setSurfaceConditionTimer(0);
+        } else {
+          surfaceConditionTimerRef.current = nextTimer;
+          setSurfaceConditionTimer(nextTimer);
+        }
+
+        // Dilemma event check — every 50 ticks, 40% chance if none active
+        const nextDt = dilemmaTimerRef.current + 1;
+        if (nextDt >= 50 && !activeDilemmaRef.current) {
+          if (Math.random() < 0.40) {
+            const currentCond = surfaceConditionRef.current.id;
+            const popNow      = colonistsRef.current.length;
+            const eligible    = DILEMMA_EVENTS.filter(ev => {
+              if (firedDilemmasRef.current.includes(ev.id)) return false;
+              if (ev.minTick && nextTick < ev.minTick) return false;
+              if (ev.minPop  && popNow < ev.minPop)     return false;
+              if (ev.condition && ev.condition !== currentCond) return false;
+              return true;
+            });
+            if (eligible.length > 0) {
+              const picked = eligible[Math.floor(Math.random() * eligible.length)];
+              setActiveDilemma(picked);
+              activeDilemmaRef.current = picked;
+              pushEventTrace("dilemma_fired", null, picked.id, nextTick);
+              setTimescale(0);
+              playDilemma();
+              setFiredDilemmas(p => [...p, picked.id]);
+              firedDilemmasRef.current = [...firedDilemmasRef.current, picked.id];
+            }
+          }
+          dilemmaTimerRef.current = 0;
+          setDilemmaTimer(0);
+        } else {
+          dilemmaTimerRef.current = nextDt;
+          setDilemmaTimer(nextDt);
+        }
+      }
 
       const historySnapshot = {
         tick: tickRef.current,
@@ -2059,25 +2087,28 @@ export default function Speranza() {
     if (a.suppressHeatTicks) outcomeBits.push(`Heat suppressed ${a.suppressHeatTicks}t`);
     if (a.recruitFree)  setColonists(p => [...p, makeColonist(tickRef.current)]);
     if (a.recruitFree)  outcomeBits.push("1 colonist joined");
+    // Pick targets outside the updaters — rolling inside means StrictMode picks
+    // a different victim on the second pass and the memorial entry desyncs from
+    // who actually died.
     if (a.removeRandomColonist) {
-      setColonists(prev => {
-        const pool = prev.filter(c => c.status !== "onExpedition");
-        if (pool.length === 0) return prev;
+      const pool = colonistsRef.current.filter(c => c.status !== "onExpedition");
+      if (pool.length > 0) {
         const target = pool[Math.floor(Math.random() * pool.length)];
+        setColonists(prev => prev.filter(c => c.id !== target.id));
         pushEventTrace("morale_death", target.name, "dilemma");
         addToMemorialRef.current(target, "moraleDeath", tickRef.current);
-        return prev.filter(c => c.id !== target.id);
-      });
-      outcomeBits.push("1 colonist lost");
+        outcomeBits.push(`${target.name} lost`);
+      }
     }
     if (a.injureRandom) {
-      setColonists(prev => {
-        const pool = prev.filter(c => c.status === "idle" || c.status === "working");
-        if (pool.length === 0) return prev;
+      const pool = colonistsRef.current.filter(c => c.status === "idle" || c.status === "working");
+      if (pool.length > 0) {
         const target = pool[Math.floor(Math.random() * pool.length)];
-        return prev.map(c => c.id === target.id ? { ...c, status: "injured", injuryTicksLeft: 20, injuryCount: (c.injuryCount ?? 0) + 1 } : c);
-      });
-      outcomeBits.push("1 colonist injured");
+        setColonists(prev => prev.map(c => c.id === target.id
+          ? { ...c, status: "injured", assignedRoom: null, injuryTicksLeft: 20, injuryCount: (c.injuryCount ?? 0) + 1 }
+          : c));
+        outcomeBits.push(`${target.name} injured`);
+      }
     }
     if (a.schematicRandom) {
       const allSch = ["turretSchematics","empSchematics","fortSchematics","geoSchematics","researchSchematics"];
@@ -2185,6 +2216,9 @@ export default function Speranza() {
     setHistoryLog([]);
     setDeprivedTicks(0);
     deprivedTicksRef.current = 0;
+    surfaceConditionTimerRef.current = 0;
+    dilemmaTimerRef.current = 0;
+    activeDilemmaRef.current = null;
     raidCooldownTicksRef.current = RAID_GRACE_TICKS;
     raidSuppressedThisRaidRef.current = 0;
     tickHistoryRef.current = [];
