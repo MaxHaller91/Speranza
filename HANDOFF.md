@@ -14,6 +14,14 @@ bugs that were misdiagnosed in this repo for months.
 **`plans/roadmap/README.md`** — the ordered work queue, with completed items
 ticked off and a detail doc per remaining step.
 
+Then `memory-bank/activeContext.md` for what is true right now, and
+`memory-bank/progress.md` for what works and what is known broken. The rest of
+`memory-bank/` (`projectbrief`, `productContext`, `systemPatterns`,
+`techContext`) is stable background — read it when you need it, not every time.
+Keep `activeContext.md` *current* rather than appending to it; it rotted once
+already by becoming a session log, and a stale "still open" list sent work at
+problems that were already fixed.
+
 ---
 
 ## 2. The two rules
@@ -99,3 +107,46 @@ should happen before any store page exists.
 - Dev harnesses live at `/Speranza/sprites.html` (colonist poses) and
   `/Speranza/defense.html` (the minigame at any raid size). Both are excluded
   from production builds — re-verify that if you touch the build config.
+
+---
+
+## 6. How to work on this repo
+
+This is a game intended for Steam. That sets the bar: it has to be *fun*, not
+merely correct. A feature that builds clean and plays badly is not done.
+
+**Play it, don't just build it.** Both playtest passes found bugs that no amount
+of reading found — 6/5 colonists, scrap inflating, a raid banner that made
+losing look identical to winning. Ship nothing on the strength of a clean build
+alone.
+
+**Verify numerically, not visually.** Sprite positions were checked by sampling
+canvas pixels; balance changes were checked with throwaway node scripts. "Looks
+about right" has been wrong here more than once.
+
+**Report what actually happened.** If a test failed, say so and paste the
+output. If you could not reproduce something, say that plainly instead of
+inventing a cause — that exact honesty is what located the real bug (losing
+being indistinguishable from winning) after the reported symptom turned out not
+to exist.
+
+**When told to keep going, execute.** Do not re-ask a question that has already
+been answered, and do not narrate options you are not going to take.
+
+**Prefer the smallest change that makes position/decisions matter.** Adjacency
+was chosen over a full overhaul for this reason.
+
+## 7. Before you commit
+
+1. **The StrictMode audit script must report `0`.** It is in
+   `plans/MASTER_ROADMAP.md` §2. This is not optional — it has silently
+   corrupted the game three separate times.
+2. `npm run build` passes. (Never run it mid-browser-test; it reloads the page.)
+3. You actually ran the thing in the browser and watched it behave.
+4. Tick off the roadmap item in `plans/roadmap/README.md`, and update
+   `memory-bank/activeContext.md` if what's-true-now changed.
+5. Commit to `opus-5` with a message describing the *behaviour* change, not the
+   files touched.
+
+**Do not** merge to `main` or `testing`, open a PR, or start roadmap steps 7–8
+without a human in the loop.
