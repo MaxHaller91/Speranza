@@ -102,6 +102,15 @@ follow-up player report. All fixed:
 
 ## Automated Soak Test — 2026-07-31 (opus-5)
 
+> **Correction (same day).** The harness in this run called the dev hook's
+> `assign` as `assign(colonistId, {r, c})`. The real signature is
+> `handleAssign(r, c, delta)` — it picks the first idle colonist itself — so
+> every assignment silently failed and **that colony was never staffed at all**.
+> Findings below about morale collapse and population are therefore about an
+> *unstaffed* colony, not a badly-played one. The correctness findings (floats,
+> stale hook, pause causes) are unaffected.
+
+
 First soak run against a real production build (`npm run soak`, port 4180).
 **Reached day 10 on one continuous colony, then the colony was wiped by a large
 raid and the harness restarted it.** Day 25 continuous was *not* reached — see

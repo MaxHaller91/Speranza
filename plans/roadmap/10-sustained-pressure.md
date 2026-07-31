@@ -16,6 +16,32 @@ collapse, but that colony had **no food or water rooms built and idle
 colonists** — it is not evidence of late-game pressure and should not be cited
 as such.
 
+## Measured: why it is solved
+
+From `DRAIN_PER_COL` (`gameData.js:777`) — 0.4 food, 0.4 water, 0.2 energy per
+colonist per tick — and the room definitions at `gameData.js:293-316`:
+
+| setup | food | water | energy | scrap | |
+|---|---|---|---|---|---|
+| pop 3, one worker each | +0.8 | +0.8 | +1.4 | 0 | sustains |
+| pop 5, one each + workshop | 0.0 | 0.0 | 0.0 | +2.0 | sustains |
+| pop 5, two each (full) | +2.0 | +2.0 | +2.0 | +2.0 | sustains |
+| pop 8, two each (full) | +0.8 | +0.8 | +1.4 | +2.0 | sustains |
+| pop 12, two each (full) | −0.8 | −0.8 | +0.6 | +2.0 | starves |
+
+**The crux: one Hydroponics worker produces 2 food/tick and a colonist eats
+0.4, so one worker feeds exactly 5 colonists — and the pop cap with a single
+Barracks is also 5.** Life support therefore never has to scale. One staffed
+Hydroponics and one staffed Water Recycler cover the entire reachable
+population with surplus to spare, forever, and stores climb to `MAX_RES` and
+sit there.
+
+It only goes negative around pop 12, which requires deliberately building extra
+Barracks — i.e. the player has to opt in to the only pressure that exists.
+
+Whatever fix is chosen, this ratio is the thing to break: **per-colonist demand
+must be able to outrun a fixed number of life-support rooms.**
+
 ## Directions worth considering
 
 - **Decay / maintenance.** Rooms degrade and need scrap upkeep, so a static
