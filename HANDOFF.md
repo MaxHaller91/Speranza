@@ -1,0 +1,101 @@
+# Speranza — Handoff
+
+**Start here.** Branch `opus-5`, branched from `testing`. Everything below is
+committed and pushed.
+
+---
+
+## 1. Read these two things first
+
+**`plans/MASTER_ROADMAP.md`** — contains two invariants that, if broken, silently
+corrupt the game, plus the audit script that catches one of them. Both explain
+bugs that were misdiagnosed in this repo for months.
+
+**`plans/roadmap/README.md`** — the ordered work queue, with completed items
+ticked off and a detail doc per remaining step.
+
+---
+
+## 2. The two rules
+
+**Never write `cell.workers` directly.** It is derived from each colonist's
+`assignedRoom`. Change the colonist and let the reconciler follow. Every "remove
+a worker" path used to pick a *random* staffed room.
+
+**Never put randomness or side effects inside a state updater.** `main.jsx`
+renders under `StrictMode`, which double-invokes updaters in development. This
+caused raid announcements to fire twice, level-ups to log twice, and every
+expedition to resolve twice per tick with different random outcomes. The audit
+script in the master roadmap must report `0`.
+
+---
+
+## 3. Current state
+
+Done on this branch: colonist→room assignment model, animated colonist sprites,
+heat/raid rebalance, starvation as a survivable process, StrictMode purity sweep
+(11 sites), base-defense minigame depth, expeditions phases 1–2, room adjacency,
+colony naming, and two playtest bug passes (ten bugs).
+
+Full commit list and detail: `plans/roadmap/README.md` and
+`memory-bank/progress.md`.
+
+---
+
+## 4. Open threads, highest value first
+
+### a) The 25-day soak test — set up but not completed
+
+A `window.__speranza` dev hook now exposes real game state plus actions
+(`build`, `assign`, `recruit`, `launch`, `setTimescale`, `sandboxTopUp`), so a
+test harness can assert on state instead of scraping rendered text. It is behind
+`import.meta.env.DEV` and verified absent from the production bundle.
+
+**Run the soak against the production preview, not the dev server:**
+
+```bash
+npm run build && npx vite preview --port 4173
+# then open http://localhost:4173/Speranza/
+```
+
+Why: the **dev build runs at ~4.5× when set to 10×**, because StrictMode
+double-invokes the whole tick loop. Production hits a true 10× (measured: 20
+ticks in 8s). At true 10×, day 25 is about 8 minutes of wall clock.
+
+Caveat: the dev hook is stripped from production builds. Either scrape the DOM
+for the soak, or add a build flag that keeps the hook in preview builds.
+
+Related observation worth keeping: a tick appears to cost ~1s of main-thread
+work in dev, against a 400ms production budget. There is not much headroom —
+this will matter for bigger colonies or a faster speed setting.
+
+### b) Resources are floats at the source
+
+`food: 57.599999999999994`, `energy: 86.80000000000001`. Only the minigame's
+*display* was rounded. The underlying values carry the error everywhere, so it
+can surface in any new UI. Fix at the source in the tick loop's resource maths.
+
+### c) Pause ownership is still tangled
+
+There are multiple independent `setTimescale` callers: the overlay-pause effect,
+the help handler, raid prep, and the dilemma trigger. One of them (toast
+dismissal) was silently resetting game speed to 1× and has been removed.
+**Consolidate before adding a fourth caller** — `plans/expedition-decisions-v2.md`
+depends on this for expedition decision prompts.
+
+### d) Everything else
+
+`plans/roadmap/` steps 2–9, expeditions phases 3–6
+(`plans/expedition-decisions-v2.md`), and the Arc Raiders IP rename, which
+should happen before any store page exists.
+
+---
+
+## 5. Dev-loop gotchas that will waste your time
+
+- `npm run build` **reloads the dev page** — `dist/` is inside the watched
+  directory. Never build in the middle of an in-browser test.
+- Editing *any* project file reloads the page too, including markdown.
+- Dev harnesses live at `/Speranza/sprites.html` (colonist poses) and
+  `/Speranza/defense.html` (the minigame at any raid size). Both are excluded
+  from production builds — re-verify that if you touch the build config.
