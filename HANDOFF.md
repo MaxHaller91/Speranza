@@ -3,6 +3,15 @@
 **Start here.** Branch `opus-5`, branched from `testing`. Everything below is
 committed and pushed.
 
+> **Keep this file current as you go — every commit, not at the end.** A session
+> can be cut off mid-task with no warning (usage limits give no advance signal),
+> so treat "the docs are up to date" as an invariant that holds continuously
+> rather than a step you do before stopping. If you are partway through
+> something when you commit, say so in §4 under a **Partially done** heading:
+> what works, what does not, and the next concrete action. A precise
+> half-finished note is worth far more to the next session than a tidy summary
+> written too late to survive.
+
 ---
 
 ## 1. Read these two things first
@@ -52,7 +61,45 @@ Full commit list and detail: `plans/roadmap/README.md` and
 
 ## 4. Open threads, highest value first
 
-### a) The 25-day soak test — set up but not completed
+### a) The 25-day soak test — **unblocked, run in progress**
+
+**The blocker is fixed.** `npm run soak` builds with `--mode soak` (via
+`.env.soak`, `VITE_SOAK=1`) and serves on port 4180. That is a *production*
+build — honest clock — that keeps the `window.__speranza` hook. Verified both
+ways: plain `npm run build` is 363.75 kB with no hook, soak build is 364.76 kB
+with it. Preview config `speranza-soak` is in `.claude/launch.json`.
+
+Two hook additions were needed and are in:
+- **`state.pauseCause`** — names *why* the clock is stopped (`dilemma`,
+  `traitPicker`, `surfaceDefense`, `milestone`, `help`, `buildMenu`, `gameOver`,
+  `manual`). Before this a harness saw `timescale: 0` and could not tell whether
+  it had paused itself or something was waiting for input. This cost real time.
+- **`sandboxMorale(floor)`** — morale, not supply, is what kills an unmanaged
+  colony (see the finding below). Same caveat as `sandboxTopUp`: never judge
+  balance from a run that used either.
+
+**Result: reached day 10 continuous, not 25.** A large raid wiped all four
+colonists on day 10 and the harness restarted the run. Full findings and the
+day-by-day table are in `memory-bank/progress.md` under "Automated Soak Test".
+
+Headlines: floats confirmed on energy/food/water; an unmanaged colony dies on
+day 3 of *morale* collapse with full stores; heat only ratchets upward (0→219
+over 10 days); `large` raids appear on **day 3** against a 3-person colony;
+expeditions and tech never fired at all in 10 days.
+
+**Why 25 was not reached, and what to do about it.** Raids kill the colony
+faster than it grows, and death restarts at day 1. Two ways forward — the second
+is better because it is real product work rather than test scaffolding:
+
+- teach the harness to actually play the tower defense competently, or
+- land **roadmap step 6 (difficulty options)** and run the soak on an easier
+  setting. Prefer this.
+
+The harness is throwaway JS injected into the page (`window.__soak`); it is not
+committed. Rebuild it from the notes in `progress.md` if a run needs repeating.
+Note that morale's real range is **−100..100**, not 0..100.
+
+### a-old) Original notes on the soak blocker (kept for context)
 
 A `window.__speranza` dev hook now exposes real game state plus actions
 (`build`, `assign`, `recruit`, `launch`, `setTimescale`, `sandboxTopUp`), so a

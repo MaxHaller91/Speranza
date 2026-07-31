@@ -2335,12 +2335,30 @@ ${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelte
   // Long playtests previously had to scrape rendered text to work out what the
   // colony was doing, which is fragile and misses anything not on screen. This
   // exposes the real state so a test harness can assert on it directly.
-  // Stripped from production builds by the import.meta.env.DEV guard.
-  useEffect(() => {
-    if (!import.meta.env.DEV) return;
-    window.__speranza = {
-      get state() {
-        return {
+  // Stripped from ordinary production builds by the guard below.
+  //
+  // The soak escape hatch: long playtests cannot use the dev server, because
+  // StrictMode double-invokes the whole tick loop there and 10x speed actually
+  // runs at ~4.5x. Only a production build has an honest clock — but a
+  // production build normally strips this hook, which left soak tests with no
+  // way to read state. `npm run soak` builds with VITE_SOAK=1 to keep it.
+  // Plain `npm run build` is unaffected and still ships without the hook.
+  //
+  // Object identity is deliberately STABLE. This effect used to run on every
+  // render and reassign window.__speranza to a fresh object whose getter closed
+  // over that render's variables. A harness that did `const s = window.__speranza`
+  // once — the obvious thing to write — then read frozen state forever, silently.
+  // It cost a soak run: the harness saw `surfaceDefenseActive: true` for 229
+  // consecutive polls after the raid had already finished, so it never resumed
+  // the clock. Everything live is read through a ref, and the global is assigned
+  // exactly once, so capturing the reference is now safe.
+  // The guard is a compile-time constant, so this whole block — snapshot
+  // closure, actions, sandbox helpers — is dead code the bundler drops from an
+  // ordinary production build. Without it the object is rebuilt every render
+  // and ships to players.
+  const devHookRef = useRef(null);
+  if (import.meta.env.DEV || import.meta.env.VITE_SOAK) devHookRef.current = {
+    snapshot: () => ({
           tick, day: Math.floor(tick / 48) + 1, timescale,
           colonyName, res, heat, morale,
           colonists, popCap, totalColonists, unassigned,
@@ -2349,8 +2367,22 @@ ${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelte
           raidWindow, activeRaid, surfaceDefenseActive, pendingRaidSize,
           deprivedTicks, memorial, firedMilestones, historyLog,
           gameOver, log,
-        };
-      },
+          // Why the clock is stopped. Without this a harness sees timescale 0
+          // and cannot tell whether it paused itself, a dilemma is waiting for
+          // an answer, or someone levelled up — they all look identical from
+          // outside, and every one of them blocks an unattended playtest.
+          activeDilemma, milestoneToast, helpOpen, buildMenu, selected,
+          pauseCause:
+            gameOver ? "gameOver"
+            : colonists.some(c => c.pendingTraitPick) ? "traitPicker"
+            : activeDilemma ? "dilemma"
+            : milestoneToast ? "milestone"
+            : helpOpen ? "help"
+            : surfaceDefenseActive ? "surfaceDefense"
+            : (buildMenu && selected && grid[selected.r]?.[selected.c] && !grid[selected.r][selected.c].type) ? "buildMenu"
+            : timescale === 0 ? "manual"
+            : null,
+    }),
       // Actions that bypass UI state, so a harness never has to fake clicks.
       setTimescale,
       build: (r, c, type) => { setSelected({ r, c }); setTimeout(() => handleBuild(type), 0); },
@@ -2370,8 +2402,32 @@ ${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelte
         water:  Math.max(prev.water,  floor),
         scrap:  Math.max(prev.scrap,  floor),
       })),
+      // Morale, not supply, is what kills an unmanaged colony: with resources
+      // pinned at 150 a fresh colony still collapsed to -100 morale and died on
+      // day 3. A soak test needs to survive to day 25 to exercise raids,
+      // expeditions and milestones at all, so it needs this lever too.
+      // Same caveat as sandboxTopUp: never judge balance from a run that used it.
+      sandboxMorale: (floor = 40) => setMorale(prev => Math.max(prev, floor)),
+  };
+
+  useEffect(() => {
+    if (!import.meta.env.DEV && !import.meta.env.VITE_SOAK) return;
+    if (window.__speranza) return; // assign once — see the identity note above
+    const call = (name) => (...args) => devHookRef.current[name](...args);
+    window.__speranza = {
+      get state() { return devHookRef.current.snapshot(); },
+      setTimescale:  call("setTimescale"),
+      build:         call("build"),
+      assign:        call("assign"),
+      recruit:       call("recruit"),
+      launch:        call("launch"),
+      setCrew:       call("setCrew"),
+      setLocation:   call("setLocation"),
+      restart:       call("restart"),
+      sandboxTopUp:  call("sandboxTopUp"),
+      sandboxMorale: call("sandboxMorale"),
     };
-  });
+  }, []);
 
   // ── JSX ───────────────────────────────────────────────────────────────────
   return (

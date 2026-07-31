@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "soak": "vite build --mode soak && vite preview --port 4180 --strictPort"
   },
   "dependencies": {
     "react": "^18.3.1",

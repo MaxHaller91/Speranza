@@ -100,6 +100,62 @@ follow-up player report. All fixed:
   but left alert dings at full volume with no way to stop them. The slider now
   governs music and SFX, and 0 means silent.
 
+## Automated Soak Test — 2026-07-31 (opus-5)
+
+First soak run against a real production build (`npm run soak`, port 4180).
+**Reached day 10 on one continuous colony, then the colony was wiped by a large
+raid and the harness restarted it.** Day 25 continuous was *not* reached — see
+"why" below. Roughly 8 minutes of wall clock, 6 raids played.
+
+Caveat: the run used `sandboxTopUp` and `sandboxMorale` to stay alive, so
+**nothing here is evidence about balance** — only about correctness and pacing.
+
+### Infrastructure fixed to make this possible
+
+- `npm run soak` = production build (honest clock) that keeps the
+  `window.__speranza` hook, via `--mode soak` / `.env.soak`. Plain
+  `npm run build` still strips it — verified 363.77 kB without, 365.15 kB with.
+- **The hook used to hand back frozen state.** Its effect had no dependency
+  array, so every render replaced `window.__speranza` with a new object whose
+  getter closed over that render's variables. `const s = window.__speranza` —
+  the obvious harness idiom — then read a snapshot forever. It burned a run:
+  the harness saw `surfaceDefenseActive: true` for 229 polls after the raid
+  ended and never restarted the clock. Identity is now stable, state reads
+  through a ref.
+- Added `state.pauseCause` so a harness can tell *why* the clock is stopped.
+  Previously every cause looked like `timescale: 0`.
+
+### Findings
+
+1. **Floats confirmed on energy, food AND water** — `197.60000000000002`,
+   `210.20000000000002`. Broader than the previously-recorded energy-only note.
+2. **An unmanaged colony dies on day 3 of morale collapse with full stores.**
+   Resources pinned at 150; morale still reached −100 and everyone died. Morale,
+   not supply, is the binding early constraint.
+3. **Heat only ratchets up.** Day-by-day: 0, 65, 130, 168, 197, 152, 197, 150,
+   219. It dips slightly after a raid and then resumes climbing. Over 10 days it
+   never returned near zero.
+4. **Raids are very frequent and escalate fast** — days 3, 4, 6, 6, 8, 9, with
+   `large` raids appearing on **day 3** against a 3-person colony. The day-10
+   wipe was 4/4 colonists `raidKilled` in one large raid.
+5. **Population never grew** past 4 against a cap of 5 across the whole run,
+   while raids removed colonists steadily (4→3→3→3→2→2→0).
+6. **Expeditions and tech never fired** — `exp: 0` and `techs: 0` for all 10
+   days. Large parts of the game are simply not reachable on this trajectory.
+7. **Three separate things hard-pause the colony** waiting on human input: the
+   raid minigame, dilemmas, and trait picks. This is the autoplayability
+   blocker, and it is a category rather than a single bug.
+8. **Worth checking:** the harness kept clicking `⚡ EMP BURST` after its label
+   read `(0)`. The button appears to remain present and clickable at zero
+   charges — confirm whether it is actually disabled.
+
+### Why day 25 was not reached
+
+Raids kill the colony faster than it can grow, and a death restarts the run at
+day 1. Getting a *continuous* 25 days needs either a harness that plays the
+tower defense competently, or difficulty options (roadmap step 6) to run the
+soak on an easier setting. The second is cheaper and is real product work.
+
 ## Known Issues / Limitations ⚠️
 
 ### Save System Validation Pending
