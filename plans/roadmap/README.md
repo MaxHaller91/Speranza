@@ -24,6 +24,7 @@ first** — it contains two invariants that, if broken, silently corrupt the gam
 - [x] Expeditions phase 1 — pure advancement transition — `0a6fdac`
 - [x] Expeditions phase 2 — destinations + manual crew — `8829d88`
 - [x] **Step 1** Room adjacency + colony naming — `fb99027`
+- [x] Playtest bug pass — 8 fixes — `32e7bcc`
 
 ### Next
 - [ ] **Step 2** — Wire the unused lore content · `02-wire-unused-lore.md`
@@ -33,6 +34,7 @@ first** — it contains two invariants that, if broken, silently corrupt the gam
 - [ ] **Step 6** — Difficulty options · `06-difficulty-options.md`
 - [ ] **Step 7** — Variable room sizes (silhouette) · `07-variable-room-sizes.md`
 - [ ] **Step 8** — Per-cell excavation (player-carved shape) · `08-per-cell-excavation.md`
+- [ ] **Step 9** — Talent points + TD depth · `09-talent-points-and-td-depth.md`
 - [ ] Expeditions phases 3–6 · `../expedition-decisions-v2.md`
 - [ ] IP rename pass — see below
 
