@@ -26,8 +26,8 @@ first** — it contains two invariants that, if broken, silently corrupt the gam
 - [x] **Step 1** Room adjacency + colony naming — `fb99027`
 - [x] Playtest bug pass — 8 fixes — `32e7bcc`
 - [x] **Step 6** Difficulty options (settler/survivor/condemned; heat, raid,
-      wave-budget, raid-cooldown, and morale-drain multipliers) — see
-      `memory-bank/progress.md` "Difficulty Options" for the fourth-lever
+      wave-budget, raid-cooldown, and morale-drain multipliers) — `d9cc056`,
+      see `memory-bank/progress.md` "Difficulty Options" for the fourth-lever
       rationale and a NaN bug found+fixed during verification
 
 ### Next
