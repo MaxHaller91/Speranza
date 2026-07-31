@@ -107,9 +107,12 @@ export const RAID_LAUNCH_CHANCE = 0.60;
 // the soak test found morale collapse, not resource starvation, kills an
 // early unmanaged colony, so it gets its own lever alongside heat/raids.
 export const DIFFICULTIES = {
-  settler:   { label: "SETTLER",   heatMult: 0.7, raidMult: 0.7,  waveMult: 0.75, graceMult: 1.5, moraleDrainMult: 0.6 },
-  survivor:  { label: "SURVIVOR",  heatMult: 1.0, raidMult: 1.0,  waveMult: 1.0,  graceMult: 1.0, moraleDrainMult: 1.0 },
-  condemned: { label: "CONDEMNED", heatMult: 1.3, raidMult: 1.35, waveMult: 1.3,  graceMult: 0.6, moraleDrainMult: 1.3 },
+  settler:   { label: "SETTLER",   desc: "Fewer, smaller raids and a colony that holds its nerve. For learning the systems.",
+               heatMult: 0.7, raidMult: 0.7,  waveMult: 0.75, graceMult: 1.5, moraleDrainMult: 0.6 },
+  survivor:  { label: "SURVIVOR",  desc: "The intended experience. The Arc find you eventually, and morale is a real cost.",
+               heatMult: 1.0, raidMult: 1.0,  waveMult: 1.0,  graceMult: 1.0, moraleDrainMult: 1.0 },
+  condemned: { label: "CONDEMNED", desc: "Relentless raids, little recovery time, and despair spreads fast. Expect to lose colonies.",
+               heatMult: 1.3, raidMult: 1.35, waveMult: 1.3,  graceMult: 0.6, moraleDrainMult: 1.3 },
 };
 export const DIFFICULTY_ORDER = ["settler", "survivor", "condemned"];
 export const DEFAULT_DIFFICULTY = "survivor";

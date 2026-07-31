@@ -30,6 +30,10 @@ first** — it contains two invariants that, if broken, silently corrupt the gam
       see `memory-bank/progress.md` "Difficulty Options" for the fourth-lever
       rationale and a NaN bug found+fixed during verification
 
+- [x] Start screen + pause-ownership consolidation — difficulty is now pickable
+      on a first colony instead of only after dying once; five independent
+      `setTimescale` callers reduced to one owner
+
 ### Next
 
 **Step 9a (talent points) is pulled to the front**, out of numerical order. It is

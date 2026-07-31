@@ -50,6 +50,7 @@ import SurfaceDefense from './surface_defense';
 import SkyBackground   from './components/SkyBackground.jsx';
 import RaidBanner      from './components/RaidBanner.jsx';
 import GameOverModal   from './components/GameOverModal.jsx';
+import StartScreen     from './components/StartScreen.jsx';
 import DilemmaModal    from './components/DilemmaModal.jsx';
 import TraitPicker     from './components/TraitPicker.jsx';
 import BuildMenu       from './components/BuildMenu.jsx';
@@ -105,7 +106,13 @@ export default function Speranza() {
   const [unlockedTechs, setUnlockedTechs] = useState([]);
   // 0 = paused, otherwise multiplier applied to TICK_MS
   const TIMESCALES = [0, 0.5, 1, 2, 4, 10];
-  const [timescale,   setTimescale]   = useState(1);
+  // `timescale` is DERIVED further down — see "Pause ownership" — from the
+  // player's chosen speed and whatever is currently blocking the clock.
+  // These two are the only stored pieces:
+  //   speed       — what the player picked. Never 0, never written by an overlay.
+  //   manualPause — the player's own pause toggle.
+  const [speed,       setSpeed]       = useState(1);
+  const [manualPause, setManualPause] = useState(false);
   const [musicVolume, setMusicVolumeState] = useState(() => Math.round(getMusicVolume() * 100));
   // activeRaid: null | { sizeKey, ticksLeft, strikeCountdown }
   const [activeRaid,  setActiveRaid]  = useState(null);
@@ -145,6 +152,45 @@ export default function Speranza() {
   const [helpOpen, setHelpOpen] = useState(false);
   const [helpPage, setHelpPage] = useState(0);
   const [recentDilemmaOutcomes, setRecentDilemmaOutcomes] = useState([]);
+  // False until the player presses BEGIN on the start screen. Loading a save
+  // also counts as starting — you already have a colony at that point.
+  const [runStarted, setRunStarted] = useState(false);
+
+  // ── Pause ownership ───────────────────────────────────────────────────────
+  // ONE place decides whether the clock runs. Previously five callers wrote
+  // `timescale` independently — the help modal, an overlay effect that had
+  // `timescale` in its own deps and so fought anything else that set it, raid
+  // prep, the dilemma trigger, and save-load — and an overlay restored the old
+  // speed from a ref afterwards. Dismissing a toast at 10x silently dropped you
+  // to 1x, and a harness calling setTimescale(10) was overwritten within a frame.
+  //
+  // Now: overlays do not write the clock at all. They ARE the pause, by virtue of
+  // being open, and `timescale` is derived. Nothing to restore, nothing to race.
+  // To add a new blocking overlay, add one line to this list — do not call
+  // setTimescale anywhere.
+  const pauseReason =
+      !runStarted                               ? "startScreen"
+    : gameOver                                  ? "gameOver"
+    : colonists.some(c => c.pendingTraitPick)   ? "traitPicker"
+    : activeDilemma                             ? "dilemma"
+    : milestoneToast                            ? "milestone"
+    : helpOpen                                  ? "help"
+    : surfaceDefenseActive                      ? "surfaceDefense"
+    : (buildMenu && selected && grid[selected.r]?.[selected.c] && !grid[selected.r][selected.c].type) ? "buildMenu"
+    : manualPause                               ? "manual"
+    : null;
+  const timescale = pauseReason ? 0 : speed;
+
+  // Compatibility shim so call sites (keybindings, the header, the dev hook)
+  // keep the familiar `setTimescale(n)` shape. 0 means "the player pressed
+  // pause"; anything else sets their speed and clears a manual pause. It can
+  // never override an overlay — that is the point.
+  const setTimescale = useCallback((v) => {
+    if (v === 0) { setManualPause(true); return; }
+    setManualPause(false);
+    setSpeed(v);
+  }, []);
+
   const [historyLog,            setHistoryLog]            = useState([]);
   const [heatSuppressedTicks,   setHeatSuppressedTicks]   = useState(0);
   // Consecutive ticks with food or water at zero. Drives the starvation stages.
@@ -258,17 +304,20 @@ export default function Speranza() {
 
   // ── Auto-open help modal on first play ──────────────────────────────────
   useEffect(() => {
+    // Wait for BEGIN — otherwise the help modal stacks on top of the start
+    // screen and the player meets two dialogs before seeing the game.
+    if (!runStarted) return;
     if (!localStorage.getItem(HELP_SEEN_KEY)) {
-      setHelpOpen(true);
-      setTimescale(0); // pause while reading
+      setHelpOpen(true); // `helpOpen` is itself a pause reason — see pauseReason
     }
-  }, []);
+  }, [runStarted]);
 
   const handleCloseHelp = () => {
     localStorage.setItem(HELP_SEEN_KEY, "1");
     setHelpOpen(false);
     setHelpPage(0);
-    setTimescale(1); // resume after closing
+    // No setTimescale here. Closing the modal clears the pause reason, and the
+    // player's chosen speed is still whatever they had — it was never clobbered.
   };
 
   // ── Track mouse position for tooltips ───────────────────────────────────
@@ -452,8 +501,6 @@ export default function Speranza() {
     }
   }, [readNextAutosaveSlot]);
 
-  const timescaleBeforeToastRef = useRef(1); // stores timescale to restore after toasts clear
-  const forcedPauseByOverlayRef = useRef(false);
   const toastDedupeRef = useRef(new Map());
 
   const pushEventTrace = useCallback((type, entity = null, detail = null, tickOverride = null) => {
@@ -502,30 +549,13 @@ export default function Speranza() {
     }, 10000);
   }, []);
 
-  useEffect(() => {
-    const buildMenuOpen = !!(buildMenu && selected && grid[selected.r]?.[selected.c] && !grid[selected.r][selected.c].type);
-    const traitPickerOpen = colonists.some(c => c.pendingTraitPick);
-    const popupActive =
-      traitPickerOpen ||
-      !!gameOver ||
-      !!activeDilemma ||
-      buildMenuOpen ||
-      !!milestoneToast;
-    // The colony log and effects panels are READ-ONLY side panels. They used to
-    // pause the game indefinitely with no visible cause — open the log to check
-    // what happened and your colony silently stops.
-
-    if (popupActive) {
-      if (!forcedPauseByOverlayRef.current && timescale !== 0) {
-        timescaleBeforeToastRef.current = timescale;
-      }
-      forcedPauseByOverlayRef.current = true;
-      if (timescale !== 0) setTimescale(0);
-    } else if (forcedPauseByOverlayRef.current) {
-      forcedPauseByOverlayRef.current = false;
-      setTimescale(timescaleBeforeToastRef.current || 1);
-    }
-  }, [buildMenu, selected, grid, colonists, gameOver, activeDilemma, milestoneToast, toasts.length, timescale]);
+  // The overlay-pause effect that used to live here is gone. It wrote
+  // `timescale` while also depending on it, so it fought every other caller.
+  // Overlays are now pause *reasons* in the derived `pauseReason` above.
+  //
+  // Note the colony log and effects panels are deliberately NOT pause reasons:
+  // they are read-only side panels, and they used to stop the colony
+  // indefinitely with no visible cause.
 
   const changeMorale = useCallback((delta, reason) => {
     // Difficulty only softens losses, never amplifies gains.
@@ -770,7 +800,8 @@ export default function Speranza() {
       setSurfaceDefenseActive(false);
       setPendingRaidSize(null);
       setPendingWealthBracket(0);
-      setTimescale(0);
+      setManualPause(true); // deliberate: a loaded run should not start moving
+      setRunStarted(true);  // you have a colony — do not ask for a new one
 
       addLog("💾 Save loaded. Game paused for safe resume.");
       addToast("💾 SAVE LOADED\nRun state restored.\nRaid runtime normalized to safe state.", "success", { key: `load-ok-${Date.now()}` });
@@ -1197,7 +1228,8 @@ export default function Speranza() {
             setSurfaceDefenseActive(true);
             setPendingRaidSize(sizeKey);
             setPendingWealthBracket(rw.wealthBracket ?? 0);
-            setTimescale(0); // pause colony so player can place defenses
+            // No setTimescale — `surfaceDefenseActive` is a pause reason, so the
+            // colony stops on its own while the player places defenses.
             raidSuppressedThisRaidRef.current = 0;
             setActiveRaid({ sizeKey, ticksLeft: sizeDef.duration, strikeCountdown: sizeDef.strikeEvery });
             pushEventTrace("raid_launched", null, sizeKey);
@@ -1758,7 +1790,7 @@ export default function Speranza() {
               setActiveDilemma(picked);
               activeDilemmaRef.current = picked;
               pushEventTrace("dilemma_fired", null, picked.id, nextTick);
-              setTimescale(0);
+              // No setTimescale — `activeDilemma` is a pause reason.
               playDilemma();
               setFiredDilemmas(p => [...p, picked.id]);
               firedDilemmasRef.current = [...firedDilemmasRef.current, picked.id];
@@ -2335,6 +2367,16 @@ ${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelte
     setPendingWealthBracket(0);
   };
 
+  // Pressing BEGIN on the start screen. Routed through handleRestart so the
+  // difficulty-derived refs (notably the raid grace period) are seeded from the
+  // chosen difficulty rather than whatever the defaults happened to be.
+  const handleBegin = (name, chosenDifficulty) => {
+    handleRestart(chosenDifficulty);
+    setColonyName(name);
+    setLog([`${name} founded. ${DIFFICULTIES[chosenDifficulty].label} conditions.`]);
+    setRunStarted(true);
+  };
+
   // ── Derived UI ────────────────────────────────────────────────────────────
   const selCell       = selected ? grid[selected.r][selected.c] : null;
   const armoryArmed   = grid.flatMap(r => r).some(c => c.type === "armory" && c.workers > 0);
@@ -2402,17 +2444,11 @@ ${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelte
           // and cannot tell whether it paused itself, a dilemma is waiting for
           // an answer, or someone levelled up — they all look identical from
           // outside, and every one of them blocks an unattended playtest.
+          // This is the SAME value the game runs on, not a second copy of the
+          // rules — the two used to be able to drift apart.
           activeDilemma, milestoneToast, helpOpen, buildMenu, selected,
-          pauseCause:
-            gameOver ? "gameOver"
-            : colonists.some(c => c.pendingTraitPick) ? "traitPicker"
-            : activeDilemma ? "dilemma"
-            : milestoneToast ? "milestone"
-            : helpOpen ? "help"
-            : surfaceDefenseActive ? "surfaceDefense"
-            : (buildMenu && selected && grid[selected.r]?.[selected.c] && !grid[selected.r][selected.c].type) ? "buildMenu"
-            : timescale === 0 ? "manual"
-            : null,
+          speed, manualPause,
+          pauseCause: pauseReason,
     }),
       // Actions that bypass UI state, so a harness never has to fake clicks.
       setTimescale,
@@ -2524,6 +2560,8 @@ ${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelte
       />
 
       <TraitPicker colonists={colonists} onPickTrait={handlePickTrait} />
+
+      {!runStarted && <StartScreen onBegin={handleBegin} />}
 
       <GameOverModal gameOver={gameOver} historyLog={historyLog} colonyName={colonyName} onRestart={handleRestart} />
 
@@ -2661,11 +2699,10 @@ ${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelte
       <ToastPanel
         toasts={toasts}
         milestoneToast={milestoneToast}
-        /* Toasts are notifications, not overlays — they are NOT in popupActive
-           and must not touch the clock. These handlers used to call
-           setTimescale(timescaleBeforeToastRef.current), a ref that defaults to
-           1 and only updates when a real overlay opens, so dismissing a toast
-           at 10x silently dropped you back to 1x with no indication. */
+        /* Toasts are notifications, not overlays — they are not pause reasons
+           and must not touch the clock. Dismissing a toast at 10x used to drop
+           you silently back to 1x. It structurally cannot now: dismissing a
+           toast does not change `speed`, and nothing else may write it. */
         onDismiss={(id) => setToasts(prev => prev.filter(t => t.id !== id))}
         onDismissAll={() => setToasts([])}
       />

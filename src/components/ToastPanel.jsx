@@ -29,8 +29,12 @@ export default function ToastPanel({ toasts, milestoneToast, onDismiss, onDismis
         display: "flex", flexDirection: "column", alignItems: "center", gap: 8,
         zIndex: 1000,
       }}>
+        {/* This used to read "PAUSED — notifications active", left over from when
+            toasts stopped the clock. They no longer do (they are not pause
+            reasons), so the label was telling the player the game was paused
+            while it carried on running. */}
         <div style={{ fontSize: 8, color: "#f5a623", letterSpacing: 2, background: "#1a0d00", border: "1px solid #f5a62344", borderRadius: 4, padding: "2px 10px" }}>
-          ⏸ PAUSED — notifications active
+          ⚠ {toasts.length} NOTIFICATION{toasts.length === 1 ? "" : "S"}
         </div>
         {toasts.map(toast => {
           const styles = {

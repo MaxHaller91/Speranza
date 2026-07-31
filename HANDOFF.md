@@ -140,13 +140,29 @@ this will matter for bigger colonies or a faster speed setting.
 *display* was rounded. The underlying values carry the error everywhere, so it
 can surface in any new UI. Fix at the source in the tick loop's resource maths.
 
-### c) Pause ownership is still tangled
+### c) Pause ownership — DONE
 
-There are multiple independent `setTimescale` callers: the overlay-pause effect,
-the help handler, raid prep, and the dilemma trigger. One of them (toast
-dismissal) was silently resetting game speed to 1× and has been removed.
-**Consolidate before adding a fourth caller** — `plans/expedition-decisions-v2.md`
-depends on this for expedition decision prompts.
+`timescale` used to be both "the speed the player picked" and "is the game
+stopped", so five callers wrote it independently and an overlay effect that had
+`timescale` in its own deps fought all of them.
+
+It is now **derived**, and there are only two stored pieces:
+
+- `speed` — what the player chose. Never 0, never written by an overlay.
+- `manualPause` — the player's own pause toggle.
+
+`pauseReason` is a single ordered expression listing everything that blocks the
+clock (`startScreen`, `gameOver`, `traitPicker`, `dilemma`, `milestone`, `help`,
+`surfaceDefense`, `buildMenu`, `manual`), and `timescale = pauseReason ? 0 : speed`.
+
+**To add a blocking overlay, add one line to `pauseReason`. Do not call
+`setTimescale` anywhere.** A `setTimescale(n)` shim is kept so keybindings, the
+header and the dev hook keep working; it can never override an overlay, which is
+the whole point. `state.pauseCause` in the dev hook reads that same value rather
+than recomputing it, so the two cannot drift.
+
+This is what `plans/expedition-decisions-v2.md` was waiting on — expedition
+decision prompts can now be a pause reason without touching the clock.
 
 ### d) Everything else
 

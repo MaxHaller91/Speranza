@@ -203,6 +203,57 @@ colony of a fresh session always starts on `survivor`. Persists in the save
 on both the header (small badge next to the day counter) and the game-over
 screen.
 
+## Start Screen + Pause Ownership — 2026-07-31 (opus-5)
+
+Two jobs that turned out to be one. Difficulty was only selectable from the
+game-over screen, so a first-ever colony was locked to `survivor` — you had to
+die once before the game let you choose. Adding a start screen meant adding a
+*sixth* independent writer of `timescale`, which `HANDOFF.md` §4c explicitly
+warned against, so the pause model was fixed first.
+
+### Pause ownership
+
+`timescale` conflated two different things: the speed the player picked, and
+whether the game is stopped. Five callers wrote it independently — the help
+modal, an overlay effect that had `timescale` in its own dependency array (so it
+fought every other caller), raid prep, the dilemma trigger, and save-load — and
+the overlay effect restored the previous speed from a ref afterwards.
+
+Now derived. Two stored values: `speed` (the player's choice, never 0, never
+written by an overlay) and `manualPause` (their own toggle). `pauseReason` is one
+ordered expression naming everything that blocks the clock; `timescale =
+pauseReason ? 0 : speed`. Overlays do not write the clock — they *are* the pause,
+by being open. A `setTimescale(n)` shim keeps keybindings/header/dev-hook call
+sites unchanged and structurally cannot override an overlay. The dev hook's
+`pauseCause` now reads the same `pauseReason` instead of recomputing the rules.
+
+Verified in-browser: set 10x → open help → paused with cause `help`, `speed`
+still 10 → close help → **back to 10x**. That last step returned 1x before, and
+was the long-standing "game silently slowed down" complaint. Manual pause also
+remembers the chosen speed across a pause/unpause cycle.
+
+Census afterwards: the only writers left are the shim itself, the keybindings
+(which route through it), and one deliberate `setManualPause(true)` on save-load.
+
+### Start screen
+
+`components/StartScreen.jsx` — colony name, difficulty picker with a
+one-line description per setting (added `desc` to `DIFFICULTIES`), BEGIN.
+It touches the clock not at all: `runStarted` is simply the first entry in
+`pauseReason`. `handleBegin` routes through `handleRestart(difficulty)` so the
+difficulty-derived refs (notably the raid grace period) are seeded correctly
+rather than keeping defaults. Loading a save also sets `runStarted` — you
+already have a colony at that point. The first-play help modal now waits for
+BEGIN instead of stacking on top of the start screen.
+
+### Bug found while verifying
+
+`ToastPanel.jsx` showed **"⏸ PAUSED — notifications active"** whenever any toast
+was on screen. Toasts stopped pausing the game some time ago, so that label was
+telling the player the game was paused while it kept running — spotted in a
+screenshot with `pauseCause: null` and the clock ticking. Replaced with an
+honest notification count.
+
 ## Known Issues / Limitations ⚠️
 
 ### Save System Validation Pending

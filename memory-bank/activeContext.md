@@ -23,6 +23,12 @@ level-ups logging twice, and every expedition resolving twice per tick with
 different outcomes. Audit script is in `plans/MASTER_ROADMAP.md`; it must
 report `0`.
 
+**3b. Never call `setTimescale` to pause.** The clock is derived: `speed` is the
+player's choice, `manualPause` is their toggle, and `pauseReason` lists
+everything that blocks the clock. To add a blocking overlay, add one line to
+`pauseReason` in `Speranza.jsx`. Five callers used to write `timescale`
+independently and silently undo each other.
+
 **3. The tick loop reads refs, never state.** The interval has `[timescale]`
 deps, so every piece of state it touches needs a ref mirror kept in sync by its
 own effect. Commit expedition state and update `expeditionsRef.current` in the
@@ -53,10 +59,12 @@ Commit-by-commit detail: `plans/roadmap/README.md`.
 Ordered queue with a detail doc per step: **`plans/roadmap/README.md`**.
 Highest-value open threads, with reasoning: **`HANDOFF.md` §4**.
 
-Short version — re-run the soak to a continuous day 25 now that difficulty
-options exist (not yet re-run), resources being floats at the source, tangled
-`setTimescale` ownership, roadmap steps 2, 3, 4, 5, 7–9b, expeditions phases
-3–6, and the Arc Raiders IP rename before any store page exists.
+Short version — re-run the long playtest to a continuous day 25 now that
+difficulty options exist (not yet re-run), resources being floats at the source,
+roadmap steps 2, 3, 4, 5, 7–9b, expeditions phases 3–6, and the Arc Raiders IP
+rename before any store page exists.
+
+Pause ownership is **done** — see rule 3b above and `HANDOFF.md` §4c.
 
 ## Working patterns
 
