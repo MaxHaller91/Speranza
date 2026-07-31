@@ -25,6 +25,10 @@ first** — it contains two invariants that, if broken, silently corrupt the gam
 - [x] Expeditions phase 2 — destinations + manual crew — `8829d88`
 - [x] **Step 1** Room adjacency + colony naming — `fb99027`
 - [x] Playtest bug pass — 8 fixes — `32e7bcc`
+- [x] **Step 6** Difficulty options (settler/survivor/condemned; heat, raid,
+      wave-budget, raid-cooldown, and morale-drain multipliers) — see
+      `memory-bank/progress.md` "Difficulty Options" for the fourth-lever
+      rationale and a NaN bug found+fixed during verification
 
 ### Next
 
@@ -34,12 +38,15 @@ and left surviving a raid paying *nothing* (a clean win nets about −15 scrap).
 9a closes that hole. 9b (2-D tower-defense placement) stays gated behind it and
 behind a day-25 playtest.
 
+Re-running the soak to a continuous day 25 (now possible on `settler`
+difficulty) is also high value, but is a verification pass rather than a
+roadmap step — see `HANDOFF.md` §4a.
+
 - [ ] **Step 9a** — Talent points meta-currency · `09-talent-points-and-td-depth.md`
 - [ ] **Step 2** — Wire the unused lore content · `02-wire-unused-lore.md`
 - [ ] **Step 3** — UI scale pass for Steam · `03-ui-scale-pass.md`
 - [ ] **Step 4** — Game-over as an obituary · `04-game-over-obituary.md`
 - [ ] **Step 5** — Morale visible as behaviour · `05-morale-as-behaviour.md`
-- [ ] **Step 6** — Difficulty options · `06-difficulty-options.md`
 - [ ] **Step 7** — Variable room sizes (silhouette) · `07-variable-room-sizes.md`
 - [ ] **Step 8** — Per-cell excavation (player-carved shape) · `08-per-cell-excavation.md`
 - [ ] **Step 9b** — 2-D tower-defense placement (gated) · `09-talent-points-and-td-depth.md`

@@ -98,6 +98,22 @@ export const RAID_SIZES = {
 export const RAID_SIZE_ORDER  = ["small", "medium", "large"];
 export const RAID_LAUNCH_CHANCE = 0.60;
 
+// ─── Difficulty ───────────────────────────────────────────────────────────────
+// Parameter plumbing over existing pure levers, not a redesign. heatMult and
+// raidMult scale into calcHeatDelta/calcRaidChance's threatMult-style inputs,
+// waveMult scales waveBudget()'s output, graceMult scales RAID_GRACE_TICKS and
+// raidCooldownFor()'s cooldowns, and moraleDrainMult scales every *negative*
+// morale delta (passive crowding/adjacency drain and event-driven losses) —
+// the soak test found morale collapse, not resource starvation, kills an
+// early unmanaged colony, so it gets its own lever alongside heat/raids.
+export const DIFFICULTIES = {
+  settler:   { label: "SETTLER",   heatMult: 0.7, raidMult: 0.7,  waveMult: 0.75, graceMult: 1.5, moraleDrainMult: 0.6 },
+  survivor:  { label: "SURVIVOR",  heatMult: 1.0, raidMult: 1.0,  waveMult: 1.0,  graceMult: 1.0, moraleDrainMult: 1.0 },
+  condemned: { label: "CONDEMNED", heatMult: 1.3, raidMult: 1.35, waveMult: 1.3,  graceMult: 0.6, moraleDrainMult: 1.3 },
+};
+export const DIFFICULTY_ORDER = ["settler", "survivor", "condemned"];
+export const DEFAULT_DIFFICULTY = "survivor";
+
 // ─── T2 Tech Tree ─────────────────────────────────────────────────────────────
 export const T2_TECHS = {
   barricades: {

@@ -52,7 +52,8 @@ script in the master roadmap must report `0`.
 Done on this branch: colonist→room assignment model, animated colonist sprites,
 heat/raid rebalance, starvation as a survivable process, StrictMode purity sweep
 (11 sites), base-defense minigame depth, expeditions phases 1–2, room adjacency,
-colony naming, and two playtest bug passes (ten bugs).
+colony naming, two playtest bug passes (ten bugs), a soak-test harness, and
+**difficulty options** (roadmap step 6 — settler/survivor/condemned).
 
 Full commit list and detail: `plans/roadmap/README.md` and
 `memory-bank/progress.md`.
@@ -61,7 +62,16 @@ Full commit list and detail: `plans/roadmap/README.md` and
 
 ## 4. Open threads, highest value first
 
-### a) The 25-day soak test — **unblocked, run in progress**
+### a) The 25-day soak test — **difficulty options landed; re-run not yet done**
+
+Roadmap step 6 (difficulty options) landed this session — see
+`memory-bank/progress.md` under "Difficulty Options" for the full writeup,
+including a NaN bug found and fixed during in-browser verification (a ref held
+the difficulty *key string* where a lever expected the resolved config object;
+fixed by splitting into `difficultyRef` and `diffConfigRef` in `Speranza.jsx`).
+**The soak has not yet been re-run on `settler` to check whether day 25 is now
+reachable** — that is the next concrete action for this thread. Everything
+below this paragraph is the state as of the *previous* (day-10) run.
 
 **The blocker is fixed.** `npm run soak` builds with `--mode soak` (via
 `.env.soak`, `VITE_SOAK=1`) and serves on port 4180. That is a *production*
@@ -154,6 +164,16 @@ should happen before any store page exists.
 - Dev harnesses live at `/Speranza/sprites.html` (colonist poses) and
   `/Speranza/defense.html` (the minigame at any raid size). Both are excluded
   from production builds — re-verify that if you touch the build config.
+- **The Browser-pane preview tools look for `.claude/launch.json` at the main
+  repo root, not the worktree's own `.claude/launch.json`**, even though Bash's
+  cwd is the worktree. `preview_start` with a `name` will fail to find the
+  worktree's config. Workaround: start the dev server yourself (`npm run dev
+  -- --port <N>`, backgrounded via Bash), then write a *main-repo-root*
+  `.claude/launch.json` with a `{ "name": ..., "url": "http://localhost:<N>" }`
+  entry (no `runtimeExecutable`) and call `preview_start` with that name — it
+  attaches to the already-running server instead of trying to launch one.
+  Remove that root-level file again when done so it doesn't linger as stray
+  config for the next session.
 
 ---
 

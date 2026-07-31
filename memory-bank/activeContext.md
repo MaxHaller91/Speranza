@@ -37,7 +37,14 @@ every 8 ticks) · starvation as a survivable process with a visible countdown ·
 StrictMode purity sweep across 11 sites · base-defense depth (upgrade, repair,
 sell, EMP, budget-driven wave curve) · expeditions phases 1–2 (pure advancement
 transition, destinations, manual crew) · room adjacency + colony naming · two
-playtest bug passes, ten fixes total.
+playtest bug passes, ten fixes total · production-build soak harness
+(`npm run soak`, `window.__speranza`, `state.pauseCause`) · **difficulty
+options** (roadmap step 6): `DIFFICULTIES` in `gameData.js` — settler /
+survivor / condemned — scaling heat gain, raid frequency, raid wave budget,
+raid cooldown, and (a fourth lever beyond the original plan) morale drain.
+Chosen on the game-over "NEW COLONY" screen, persists in the save, shown on
+the header and game-over screen. Details and a bug found+fixed during
+verification: `memory-bank/progress.md` under "Difficulty Options".
 
 Commit-by-commit detail: `plans/roadmap/README.md`.
 
@@ -46,9 +53,9 @@ Commit-by-commit detail: `plans/roadmap/README.md`.
 Ordered queue with a detail doc per step: **`plans/roadmap/README.md`**.
 Highest-value open threads, with reasoning: **`HANDOFF.md` §4**.
 
-Short version — the 25-day soak test (set up, not completed; must run against
-the production preview, not the dev server), resources being floats at the
-source, tangled `setTimescale` ownership, roadmap steps 2–9, expeditions phases
+Short version — re-run the soak to a continuous day 25 now that difficulty
+options exist (not yet re-run), resources being floats at the source, tangled
+`setTimescale` ownership, roadmap steps 2, 3, 4, 5, 7–9b, expeditions phases
 3–6, and the Arc Raiders IP rename before any store page exists.
 
 ## Working patterns

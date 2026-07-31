@@ -1,9 +1,13 @@
 // GameOverModal.jsx — game over / colony collapse screen
 // Props: gameOver, historyLog, onRestart
+import { useState } from "react";
+import { DIFFICULTIES, DIFFICULTY_ORDER, DEFAULT_DIFFICULTY } from "../gameData.js";
 
 export default function GameOverModal({ colonyName, gameOver, historyLog, onRestart }) {
+  const [nextDifficulty, setNextDifficulty] = useState(DEFAULT_DIFFICULTY);
   if (!gameOver) return null;
 
+  const playedDifficulty = DIFFICULTIES[gameOver.difficulty] ?? DIFFICULTIES[DEFAULT_DIFFICULTY];
   const days = gameOver.daysAlive ?? 1;
   const grade = days >= 80 ? "LEGEND" : days >= 40 ? "DEFENDER" : days >= 20 ? "SURVIVOR" : "LOST";
   const gradeColor = { LEGEND: "#ffd700", DEFENDER: "#4ab3f4", SURVIVOR: "#7ed321", LOST: "#ff4444" }[grade];
@@ -30,6 +34,7 @@ export default function GameOverModal({ colonyName, gameOver, historyLog, onRest
             {grade}
           </div>
           <div style={{ fontSize: 10, color: "#445566", letterSpacing: 2 }}>COLONY DESIGNATION: {colonyName ?? "SPERANZA"}</div>
+          <div style={{ fontSize: 9, color: "#5a4a2a", letterSpacing: 2, marginTop: 2 }}>DIFFICULTY: {playedDifficulty.label}</div>
         </div>
 
         {/* Reason */}
@@ -103,7 +108,31 @@ export default function GameOverModal({ colonyName, gameOver, historyLog, onRest
           </div>
         </div>
 
-        <button onClick={onRestart} style={{
+        {/* New colony difficulty pick — the levers only apply going forward. */}
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ color: "#2a4a6a", fontSize: 8, letterSpacing: 2, marginBottom: 6, textAlign: "center" }}>
+            NEXT COLONY DIFFICULTY
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            {DIFFICULTY_ORDER.map(key => (
+              <button
+                key={key}
+                onClick={() => setNextDifficulty(key)}
+                style={{
+                  flex: 1, padding: "8px 4px", cursor: "pointer", fontSize: 9,
+                  letterSpacing: 1, fontFamily: "monospace",
+                  background: nextDifficulty === key ? "#1a2a3a" : "#0a0c14",
+                  border: `1px solid ${nextDifficulty === key ? "#4ab3f4" : "#1a2535"}`,
+                  borderRadius: 4,
+                  color: nextDifficulty === key ? "#4ab3f4" : "#5a6a7a",
+                  fontWeight: nextDifficulty === key ? "bold" : "normal",
+                }}
+              >{DIFFICULTIES[key].label}</button>
+            ))}
+          </div>
+        </div>
+
+        <button onClick={() => onRestart(nextDifficulty)} style={{
           width: "100%", background: "#1a0000", border: "2px solid #ff3333",
           borderRadius: 6, color: "#ff6666", padding: "12px", cursor: "pointer",
           fontSize: 12, letterSpacing: 3, fontFamily: "monospace",

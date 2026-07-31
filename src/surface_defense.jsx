@@ -119,13 +119,13 @@ const BUDGET_START = 20;
 const BUDGET_END   = 210;
 
 /** Threat budget for a wave. Exported shape is pure and easy to eyeball. */
-export function waveBudget(waveIdx, totalWaves, wealthBracket = 0) {
+export function waveBudget(waveIdx, totalWaves, wealthBracket = 0, waveMult = 1) {
   const progress = totalWaves <= 1 ? 1 : waveIdx / (totalWaves - 1);
   // Shorter raids don't reach the full ceiling — a 3-wave skirmish should never
   // hit the same intensity as the last wave of an 8-wave assault.
   const reach = 0.45 + 0.55 * ((totalWaves - 3) / 5);
   const base  = BUDGET_START + (BUDGET_END - BUDGET_START) * progress * Math.min(1, reach);
-  return Math.round(base * (1 + wealthBracket * 0.22));
+  return Math.round(base * (1 + wealthBracket * 0.22) * waveMult);
 }
 
 /** Which unit types are available this deep into a raid. */
@@ -145,8 +145,8 @@ function unlockedUnits(waveIdx, totalWaves) {
 // were both the hardest and the most monotonous waves in the game.
 const MIX = { grunt: 0.42, runner: 0.16, drone: 0.18, heavy: 0.24 };
 
-export function generateWave(waveIdx, totalWaves, wealthBracket = 0) {
-  let budget = waveBudget(waveIdx, totalWaves, wealthBracket);
+export function generateWave(waveIdx, totalWaves, wealthBracket = 0, waveMult = 1) {
+  let budget = waveBudget(waveIdx, totalWaves, wealthBracket, waveMult);
   const pool = unlockedUnits(waveIdx, totalWaves);
   const counts = {};
 
@@ -166,7 +166,7 @@ export function generateWave(waveIdx, totalWaves, wealthBracket = 0) {
 
   // Whatever rounding left behind becomes grunts, so the budget is fully used.
   const spent = Object.entries(counts).reduce((s, [t, n]) => s + n * UNIT_COST[t], 0);
-  const leftover = Math.floor((waveBudget(waveIdx, totalWaves, wealthBracket) - spent) / UNIT_COST.grunt);
+  const leftover = Math.floor((waveBudget(waveIdx, totalWaves, wealthBracket, waveMult) - spent) / UNIT_COST.grunt);
   if (leftover > 0) counts.grunt = (counts.grunt ?? 0) + leftover;
 
   // Split each type across both approaches; alternate which side leads.
@@ -184,9 +184,9 @@ export function generateWave(waveIdx, totalWaves, wealthBracket = 0) {
 }
 
 /** Flat {type: count} for the wave, used by the pre-wave briefing. */
-export function waveComposition(waveIdx, totalWaves, wealthBracket = 0) {
+export function waveComposition(waveIdx, totalWaves, wealthBracket = 0, waveMult = 1) {
   const counts = {};
-  generateWave(waveIdx, totalWaves, wealthBracket)
+  generateWave(waveIdx, totalWaves, wealthBracket, waveMult)
     .forEach(g => { counts[g.type] = (counts[g.type] ?? 0) + g.count; });
   return counts;
 }
@@ -312,7 +312,7 @@ const WAVES = [
   [{ type: "heavy", side: "left", count: 2, interval: 100 }, { type: "runner", side: "right", count: 5, interval: 30 }, { type: "grunt", side: "left", count: 4, interval: 50 }],
 ];
 
-export default function SurfaceDefense({ active = true, scrap: initialScrap = 80, onScrapChange, raidSize: initialRaidSize = "medium", wealthBracket = 0, sentryWorkers = 0, onRaidWon, onRaidLost, onBunkerDestroyed }) {
+export default function SurfaceDefense({ active = true, scrap: initialScrap = 80, onScrapChange, raidSize: initialRaidSize = "medium", wealthBracket = 0, waveMult = 1, sentryWorkers = 0, onRaidWon, onRaidLost, onBunkerDestroyed }) {
   const [phase, setPhase] = useState("prep"); // prep | intermission | combat | won | lost
   const [scrap, setScrap] = useState(initialScrap);
   const [countdown, setCountdown] = useState(10); // inter-wave countdown (seconds)
@@ -343,6 +343,7 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
     waveIdx: 0,
     totalWaves: RAID_SIZES["medium"],
     wealthBracket: 0,
+    waveMult: 1,
     bunker: null,
     spawnQueue: [],
     spawnTimer: 0,
@@ -380,6 +381,7 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
     s.hatchHp = 100; s.phase = "prep";
     s.waveIdx = 0; s.totalWaves = RAID_SIZES[startRaidSize] ?? 5;
     s.wealthBracket = wealthBracket;
+    s.waveMult = waveMult;
     s.bunker = sentryWorkers > 0 ? {
       x: HATCH_X - 120,
       hp: sentryWorkers * 60,
@@ -408,7 +410,7 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
     winLostTimeoutsRef.current = [];
     setHatchHp(100); setPhase("prep");
     setWaveIdx(0); setMessage(null); setRaidSize(startRaidSize);
-  }, [active, wealthBracket, sentryWorkers]);
+  }, [active, wealthBracket, waveMult, sentryWorkers]);
 
   useEffect(() => () => {
     winLostTimeoutsRef.current.forEach(clearTimeout);
@@ -432,7 +434,7 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
     setWaveIdx(idx);
 
     // Build spawn queue from generated wave
-    const wave = generateWave(idx, s.totalWaves, s.wealthBracket);
+    const wave = generateWave(idx, s.totalWaves, s.wealthBracket, s.waveMult);
     const queue = [];
     wave.forEach(group => {
       for (let i = 0; i < group.count; i++) {
@@ -547,7 +549,7 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
           const idx = s.waveIdx;
           s.phase = "combat";
           setPhase("combat");
-          const wave = generateWave(idx, s.totalWaves, s.wealthBracket);
+          const wave = generateWave(idx, s.totalWaves, s.wealthBracket, s.waveMult);
           const queue = [];
           wave.forEach(group => {
             for (let i = 0; i < group.count; i++) {
@@ -1347,7 +1349,7 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
       <div style={{ width: W, padding: "6px 12px", background: "#050403", border: "1px solid #111", borderTop: "none" }}>
         {(phase === "prep" || phase === "intermission") && (() => {
           // Telegraph the incoming wave so placement is a decision, not a guess.
-          const comp = waveComposition(waveIdx, stateRef.current.totalWaves, stateRef.current.wealthBracket);
+          const comp = waveComposition(waveIdx, stateRef.current.totalWaves, stateRef.current.wealthBracket, stateRef.current.waveMult);
           const ICONS = { grunt: "🚶", runner: "🏃", heavy: "🛡", drone: "🛸", gunship: "🚁" };
           const air = (comp.drone ?? 0) + (comp.gunship ?? 0);
           return (

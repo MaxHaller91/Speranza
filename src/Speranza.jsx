@@ -29,6 +29,7 @@ import {
   HEAT_RELIEF_RAID_SURVIVED, HEAT_RELIEF_BARRICADE,
   getHeatState, INJURY_TICKS_BASE, HEAL_RATE_NURSE,
   RAID_SIZES, RAID_SIZE_ORDER, RAID_LAUNCH_CHANCE,
+  DIFFICULTIES, DIFFICULTY_ORDER, DEFAULT_DIFFICULTY,
   T2_TECHS, TRAITS, TRAIT_KEYS,
   makeColonist, ROOM_TYPES, EXCAVATION_DEFS,
   EXPEDITION_TYPES, EXPEDITION_ROLL_TABLES, applyMoraleModifier,
@@ -70,6 +71,10 @@ export default function Speranza() {
   // The player names their own colony. It is what the game-over screen
   // mourns, which turns "a colony died" into "KESTREL DEEP died on day 34".
   const [colonyName, setColonyName] = useState("SPERANZA");
+  // Chosen at new-colony time (game-over "NEW COLONY" screen); persists in
+  // the save and is shown on the next game-over screen. Existing saves with
+  // no difficulty field default to survivor.
+  const [difficulty, setDifficulty] = useState(DEFAULT_DIFFICULTY);
   const [expedDuration, setExpedDuration] = useState(40);
   // Launch draft — the player picks a destination and an exact crew before
   // committing, instead of the game grabbing whoever happened to be idle first.
@@ -231,6 +236,15 @@ export default function Speranza() {
   useEffect(() => { heatSuppressedTicksRef.current = heatSuppressedTicks; }, [heatSuppressedTicks]);
   // Raid cooldown — starts at 48 (one in-game day) to block raids on fresh game
   const raidCooldownTicksRef = useRef(RAID_GRACE_TICKS);
+  // The tick interval only depends on [timescale] (rule 3), so it reads
+  // difficulty through refs rather than the state variable directly.
+  // difficultyRef holds the raw key (e.g. for the game-over report);
+  // diffConfigRef holds the resolved multiplier object every lever reads.
+  const difficultyRef = useRef(difficulty);
+  useEffect(() => { difficultyRef.current = difficulty; }, [difficulty]);
+  const diffConfig = DIFFICULTIES[difficulty] ?? DIFFICULTIES[DEFAULT_DIFFICULTY];
+  const diffConfigRef = useRef(diffConfig);
+  useEffect(() => { diffConfigRef.current = diffConfig; }, [diffConfig]);
 
   // ── Assignment reconciler ────────────────────────────────────────────────
   // Single source of truth: a colonist's `assignedRoom` decides staffing, and
@@ -314,6 +328,7 @@ export default function Speranza() {
     const s = source ?? {
       tick,
       colonyName,
+      difficulty,
       res,
       heat,
       morale,
@@ -346,6 +361,7 @@ export default function Speranza() {
     return {
       tick: s.tick,
       colonyName: s.colonyName,
+      difficulty: s.difficulty,
       res: s.res,
       heat: s.heat,
       morale: s.morale,
@@ -380,7 +396,7 @@ export default function Speranza() {
       timescale: 0,
     };
   }, [
-    tick, colonyName, res, heat, morale, grid, colonists,
+    tick, colonyName, difficulty, res, heat, morale, grid, colonists,
     unlockedRows, excavations, expeditions, expedDuration, expedLocationId,
     surfaceHaul, unlockedTechs, memorial,
     raidsRepelled, largeRaidsRepelled, expeditionsCompleted,
@@ -512,9 +528,14 @@ export default function Speranza() {
   }, [buildMenu, selected, grid, colonists, gameOver, activeDilemma, milestoneToast, toasts.length, timescale]);
 
   const changeMorale = useCallback((delta, reason) => {
-    setMorale(prev => clamp(prev + delta, -100, 100));
-    moraleEventDeltasRef.current.push({ delta, reason: reason ?? "morale event" });
-    if (Math.abs(delta) >= 10) addLog(`${delta > 0 ? "📈" : "📉"} Morale ${delta > 0 ? "+" : ""}${delta} — ${reason}`);
+    // Difficulty only softens losses, never amplifies gains.
+    const scaled = delta < 0 ? delta * diffConfigRef.current.moraleDrainMult : delta;
+    setMorale(prev => clamp(prev + scaled, -100, 100));
+    moraleEventDeltasRef.current.push({ delta: scaled, reason: reason ?? "morale event" });
+    if (Math.abs(scaled) >= 10) {
+      const shown = Number.isInteger(scaled) ? scaled : scaled.toFixed(1);
+      addLog(`${scaled > 0 ? "📈" : "📉"} Morale ${scaled > 0 ? "+" : ""}${shown} — ${reason}`);
+    }
   }, []);
   const changeMoraleRef = useRef(changeMorale);
   const moraleEventDeltasRef = useRef([]);
@@ -711,6 +732,8 @@ export default function Speranza() {
     try {
       setGrid(state.grid ?? initGrid());
       setColonyName(state.colonyName ?? "SPERANZA");
+      // v1 saves predate difficulty — default them to survivor.
+      setDifficulty(DIFFICULTIES[state.difficulty] ? state.difficulty : DEFAULT_DIFFICULTY);
       setRes(state.res ?? INIT_RES);
       setColonists(Array.isArray(state.colonists) ? state.colonists : initColonists());
       setHeat(state.heat ?? 0);
@@ -902,10 +925,14 @@ export default function Speranza() {
             moraleWorkers += cell.workers;
           }
         }));
-        const moraleDrain    = Math.max(0, totalCol - 7) * 0.3;
+        const diffMoraleDrainMult = diffConfigRef.current.moraleDrainMult;
+        const moraleDrain    = Math.max(0, totalCol - 7) * 0.3 * diffMoraleDrainMult;
         const moraleGain     = moraleWorkers * 1.5;
         // Layout consequences: workshops next to bunks cost morale every tick.
-        const adjMorale      = calcAdjacencyMorale(g);
+        // Only the penalty side is scaled by difficulty — a good layout's bonus
+        // isn't a "drain" and shouldn't be softened away by an easier setting.
+        const adjMoraleRaw   = calcAdjacencyMorale(g);
+        const adjMorale      = adjMoraleRaw < 0 ? adjMoraleRaw * diffMoraleDrainMult : adjMoraleRaw;
         const netMoraleDelta = moraleGain - moraleDrain + adjMorale;
         if (moraleGain > 0) moraleTickBreakdown.plus.push(`Comfort services staffed +${moraleGain.toFixed(1)}`);
         if (moraleDrain > 0) moraleTickBreakdown.minus.push(`Crowding strain -${moraleDrain.toFixed(1)}`);
@@ -927,6 +954,7 @@ export default function Speranza() {
           if (c.quirk.id === "lightSleeper" && c.status !== "injured") quirkMoraleDelta += 0.1;
           if (c.quirk.id === "claustrophobic") quirkMoraleDelta -= 0.1;
         });
+        if (quirkMoraleDelta < 0) quirkMoraleDelta *= diffMoraleDrainMult;
         if (quirkMoraleDelta > 0) moraleTickBreakdown.plus.push(`Helpful quirk effects +${quirkMoraleDelta.toFixed(1)}`);
         if (quirkMoraleDelta < 0) moraleTickBreakdown.minus.push(`Stressful quirk effects ${quirkMoraleDelta.toFixed(1)}`);
         if (quirkMoraleDelta !== 0) {
@@ -1208,7 +1236,7 @@ export default function Speranza() {
         const heatDelta = calcHeatDelta({
           builtRooms,
           sentryWorkers: sentryCount,
-          threatMult: condThreatMult,
+          threatMult: condThreatMult * diffConfigRef.current.heatMult,
           suppressed: heatGainSuppressed,
         });
         const nextHeat = clamp(heatRef.current + heatDelta, 0, HEAT_MAX);
@@ -1221,7 +1249,7 @@ export default function Speranza() {
         const condRaidMult = surfaceConditionRef.current.effects.raidFreqMult ?? 1.0;
         const dueToRoll    = tickRef.current % RAID_ROLL_EVERY === 0;
         if (dueToRoll && raidCooldownTicksRef.current <= 0 &&
-            Math.random() < calcRaidChance(nextHeat) * condRaidMult) {
+            Math.random() < calcRaidChance(nextHeat) * condRaidMult * diffConfigRef.current.raidMult) {
           // Determine starting size based on heat state
           const hState = getHeatState(nextHeat);
           const wealth = calcColonyWealth(resRef.current, gridRef.current, colonistsRef.current);
@@ -1571,6 +1599,7 @@ export default function Speranza() {
           raidsRepelled: raidsRepelledRef.current,
           casualties: memorialRef.current,
           peakPop: peakPopulation,
+          difficulty: difficultyRef.current,
         });
       }
       // All living colonists age. On-duty colonists earn 1 XP per 10 duty ticks.
@@ -1958,7 +1987,7 @@ export default function Speranza() {
     setPendingWealthBracket(0);
     setRaidWindow(null);
     setActiveRaid(null);
-    raidCooldownTicksRef.current = raidCooldownFor(wonSize);
+    raidCooldownTicksRef.current = Math.round(raidCooldownFor(wonSize) * diffConfigRef.current.graceMult);
     unduckMusic();
     playRaidOver();
     setColonists(prev => prev.map(c => ({ ...c, raidsSurvived: (c.raidsSurvived ?? 0) + 1 })));
@@ -1996,7 +2025,7 @@ export default function Speranza() {
     setPendingWealthBracket(0);
     // The breach still has to play out underground, so the cooldown only starts
     // counting once that finishes — but the timer is set from the same table.
-    raidCooldownTicksRef.current = raidCooldownFor(lostSize);
+    raidCooldownTicksRef.current = Math.round(raidCooldownFor(lostSize) * diffConfigRef.current.graceMult);
     unduckMusic();
     playRaid();
     setRaidFlash(true);
@@ -2253,7 +2282,8 @@ ${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelte
     addToast("🏠 ALL CLEAR\nColonists returning to their posts.\nAnyone whose room is gone is now idle.", "success");
   };
 
-  const handleRestart = () => {
+  const handleRestart = (nextDifficulty = difficulty) => {
+    const nextDiffConfig = DIFFICULTIES[nextDifficulty] ?? DIFFICULTIES[DEFAULT_DIFFICULTY];
     setGrid(initGrid());
     setRes(INIT_RES);
     setColonists(initColonists());
@@ -2271,6 +2301,7 @@ ${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelte
     setGameOver(null);
     setLog(["Colony restarted."]);
     setColonyName("SPERANZA");
+    setDifficulty(nextDifficulty);
     setMorale(50);
     setUnlockedRows([0]);
     setSurfaceHaul({ salvage: 0, arcTech: 0, schematics: [] });
@@ -2294,7 +2325,7 @@ ${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelte
     surfaceConditionTimerRef.current = 0;
     dilemmaTimerRef.current = 0;
     activeDilemmaRef.current = null;
-    raidCooldownTicksRef.current = RAID_GRACE_TICKS;
+    raidCooldownTicksRef.current = Math.round(RAID_GRACE_TICKS * nextDiffConfig.graceMult);
     raidSuppressedThisRaidRef.current = 0;
     tickHistoryRef.current = [];
     eventTraceRef.current = [];
@@ -2360,7 +2391,7 @@ ${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelte
   if (import.meta.env.DEV || import.meta.env.VITE_SOAK) devHookRef.current = {
     snapshot: () => ({
           tick, day: Math.floor(tick / 48) + 1, timescale,
-          colonyName, res, heat, morale,
+          colonyName, difficulty, res, heat, morale,
           colonists, popCap, totalColonists, unassigned,
           grid, unlockedRows, excavations,
           expeditions, surfaceHaul, unlockedTechs,
@@ -2446,6 +2477,7 @@ ${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelte
       <ColonyHeader
         tick={tick}
         colonyName={colonyName}
+        difficultyLabel={diffConfig.label}
         onRenameColony={setColonyName}
         timescale={timescale}
         musicVolume={musicVolume}
@@ -2529,6 +2561,7 @@ ${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelte
             onScrapChange={(delta) => setRes(r => ({ ...r, scrap: Math.max(0, r.scrap + delta) }))}
             raidSize={pendingRaidSize ?? "small"}
             wealthBracket={pendingWealthBracket}
+            waveMult={diffConfig.waveMult}
             sentryWorkers={sentryWorkers}
             active={surfaceDefenseActive}
             onRaidWon={handleSurfaceRaidWon}

@@ -156,6 +156,53 @@ day 1. Getting a *continuous* 25 days needs either a harness that plays the
 tower defense competently, or difficulty options (roadmap step 6) to run the
 soak on an easier setting. The second is cheaper and is real product work.
 
+## Difficulty Options — 2026-07-31 (opus-5)
+
+Landed roadmap step 6, pulled forward ahead of 9a for this exact reason: the
+first soak run above couldn't reach a continuous day 25 without an easier
+setting. `DIFFICULTIES` (`gameData.js`) adds three presets — `settler` /
+`survivor` / `condemned` — each scaling four levers: `heatMult`, `raidMult`,
+`waveMult` (raid wave threat budget), and `graceMult` (raid cooldown length).
+
+A **fourth lever beyond the original plan doc's sketch** was needed:
+`moraleDrainMult`. The soak found morale collapse, not resource starvation,
+kills an unmanaged early colony (see finding #2 above) — heat/raid softening
+alone wouldn't touch that death path. It scales every *negative* morale delta
+(passive crowding/adjacency drain, quirk stress, and all event-driven losses
+routed through `changeMorale`: raids, dilemmas, desertion, deprivation) while
+leaving positive deltas alone.
+
+Verified with a throwaway 25-day, 10-seed simulation (raids per 5-day window):
+settler totalled 7.2 raids, survivor 10.4, condemned 16.2 — a real, distinct
+spread, not just noise.
+
+**Bug found and fixed during in-browser verification, worth flagging because
+it would have shipped silently:** the first implementation stored the
+difficulty *key string* (`"survivor"`) in the ref the tick loop reads, then
+accessed `.moraleDrainMult` / `.heatMult` / `.raidMult` / `.graceMult` on it as
+if it were the resolved config object. `"survivor".moraleDrainMult` is
+`undefined`, so every multiplication silently produced `NaN` — heat and morale
+both went `NaN` within the first tick or two of a fresh colony, on every
+difficulty, invisible in the console (no thrown error, just `NaN` propagating
+through `clamp`). Caught by actually running the game in the browser and
+noticing `MORALE: COLLAPSE / NaN / 100` on a day-2 colony that should have
+been fine. Fixed by splitting into two refs: `difficultyRef` (raw key, used
+only for the game-over report) and `diffConfigRef` (the resolved multiplier
+object every lever reads). Re-verified clean afterward: heat and morale stayed
+finite across a fresh run through day 2, a dilemma resolution, and into raid
+territory. This is exactly the kind of silent-NaN bug the "verify numerically,
+not visually" rule in `HANDOFF.md` §6 warns about — it doesn't crash, it just
+quietly breaks every downstream comparison (`moraleTier`, raid-chance display,
+`clamp` bounds) that reads the contaminated state.
+
+Difficulty is chosen on the game-over screen's "NEW COLONY" flow
+(`GameOverModal.jsx`) — there is no separate main-menu/start-screen in this
+codebase, so that's the only "new colony" moment that exists. The very first
+colony of a fresh session always starts on `survivor`. Persists in the save
+(`difficulty` field, defaults to `survivor` for pre-existing saves) and shows
+on both the header (small badge next to the day counter) and the game-over
+screen.
+
 ## Known Issues / Limitations ⚠️
 
 ### Save System Validation Pending

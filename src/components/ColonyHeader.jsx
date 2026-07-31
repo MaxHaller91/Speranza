@@ -24,7 +24,7 @@ function ResBar({ k, icon, label, color, res }) {
 }
 
 export default function ColonyHeader({
-  colonyName, onRenameColony,
+  colonyName, difficultyLabel, onRenameColony,
   tick, timescale, musicVolume, res, surfaceHaul, surfaceCondition,
   morale, heat, heatState, heatPct, raidWindow, radioTowerOnline,
   unlockedTechs, totalColonists, popCap, unassigned, grid,
@@ -55,7 +55,10 @@ export default function ColonyHeader({
             }}
             style={{ fontSize: 20, fontWeight: "bold", color: "#4ab3f4", letterSpacing: 3, cursor: "pointer" }}
           >⛩ {colonyName}</div>
-          <div style={{ fontSize: 9, color: "#2a4a6a", letterSpacing: 2 }}>UNDERGROUND COLONY · {tickToDayHour(tick)}</div>
+          <div style={{ fontSize: 9, color: "#2a4a6a", letterSpacing: 2 }}>
+            UNDERGROUND COLONY · {tickToDayHour(tick)}
+            {difficultyLabel && ` · ${difficultyLabel}`}
+          </div>
           <div style={{ marginTop: 3, display: "inline-flex", alignItems: "center", gap: 5, background: "#0a0c14", border: `1px solid ${surfaceCondition.color}44`, borderRadius: 4, padding: "2px 8px" }}>
             <span style={{ fontSize: 10 }}>{surfaceCondition.icon}</span>
             <span style={{ fontSize: 8, color: surfaceCondition.color, letterSpacing: 1 }}>{surfaceCondition.label}</span>
