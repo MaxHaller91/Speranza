@@ -30,23 +30,22 @@ first** — it contains two invariants that, if broken, silently corrupt the gam
       see `memory-bank/progress.md` "Difficulty Options" for the fourth-lever
       rationale and a NaN bug found+fixed during verification
 
+- [x] **Step 9a** — Talent points: Resolve earned only by repelling raids,
+      spent on 8 permanent talents that modify existing pure helpers. Meta
+      progression survives colony death (own localStorage key, not the run save)
 - [x] Start screen + pause-ownership consolidation — difficulty is now pickable
       on a first colony instead of only after dying once; five independent
       `setTimescale` callers reduced to one owner
 
 ### Next
 
-**Step 9a (talent points) is pulled to the front**, out of numerical order. It is
-not polish — the raid economy fix in `32e7bcc` correctly removed a broken reward
-and left surviving a raid paying *nothing* (a clean win nets about −15 scrap).
-9a closes that hole. 9b (2-D tower-defense placement) stays gated behind it and
-behind a day-25 playtest.
+Highest value now: **re-run the long playtest to a continuous day 25**. It is a
+verification pass rather than a roadmap step (see `HANDOFF.md` §4a), but it is
+the thing most likely to find real bugs, and both blockers are gone — difficulty
+options exist and the clock has a single owner.
 
-Re-running the soak to a continuous day 25 (now possible on `settler`
-difficulty) is also high value, but is a verification pass rather than a
-roadmap step — see `HANDOFF.md` §4a.
+9b (2-D tower-defense placement) stays gated behind that day-25 playtest.
 
-- [ ] **Step 9a** — Talent points meta-currency · `09-talent-points-and-td-depth.md`
 - [ ] **Step 2** — Wire the unused lore content · `02-wire-unused-lore.md`
 - [ ] **Step 3** — UI scale pass for Steam · `03-ui-scale-pass.md`
 - [ ] **Step 4** — Game-over as an obituary · `04-game-over-obituary.md`

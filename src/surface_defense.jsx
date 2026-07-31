@@ -312,11 +312,11 @@ const WAVES = [
   [{ type: "heavy", side: "left", count: 2, interval: 100 }, { type: "runner", side: "right", count: 5, interval: 30 }, { type: "grunt", side: "left", count: 4, interval: 50 }],
 ];
 
-export default function SurfaceDefense({ active = true, scrap: initialScrap = 80, onScrapChange, raidSize: initialRaidSize = "medium", wealthBracket = 0, waveMult = 1, sentryWorkers = 0, onRaidWon, onRaidLost, onBunkerDestroyed }) {
+export default function SurfaceDefense({ active = true, scrap: initialScrap = 80, onScrapChange, raidSize: initialRaidSize = "medium", wealthBracket = 0, waveMult = 1, sentryWorkers = 0, defenseBudgetBonus = 0, hatchHpBonus = 0, onRaidWon, onRaidLost, onBunkerDestroyed }) {
   const [phase, setPhase] = useState("prep"); // prep | intermission | combat | won | lost
   const [scrap, setScrap] = useState(initialScrap);
   const [countdown, setCountdown] = useState(10); // inter-wave countdown (seconds)
-  const [hatchHp, setHatchHp] = useState(100);
+  const [hatchHp, setHatchHp] = useState(100 + hatchHpBonus);
   const [selectedTool, setSelectedTool] = useState("turret");
   const [waveIdx, setWaveIdx] = useState(0);
   const [raidSize, setRaidSize] = useState(initialRaidSize);
@@ -339,6 +339,7 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
     projectiles: [],
     scrap: 80,
     hatchHp: 100,
+    hatchHpMax: 100,
     phase: "prep",
     waveIdx: 0,
     totalWaves: RAID_SIZES["medium"],
@@ -378,7 +379,11 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
     const startRaidSize = initialRaidSizeRef.current;
     const s = stateRef.current;
     s.enemies = []; s.defenses = []; s.projectiles = [];
-    s.hatchHp = 100; s.phase = "prep";
+    // Hardened Hatch (talent) raises both the starting and the max value, so
+    // the HP bar still reads as a fraction of full rather than overflowing.
+    s.hatchHpMax = 100 + hatchHpBonus;
+    s.hatchHp = s.hatchHpMax; s.phase = "prep";
+    setHatchHp(s.hatchHp);
     s.waveIdx = 0; s.totalWaves = RAID_SIZES[startRaidSize] ?? 5;
     s.wealthBracket = wealthBracket;
     s.waveMult = waveMult;
@@ -397,7 +402,7 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
     s.empCharges = EMP_CHARGES_PER_RAID; s.empFlash = 0;
     setEmpCharges(EMP_CHARGES_PER_RAID);
     // Draw the budget from colony scrap exactly once per raid.
-    const committed = Math.round(Math.min(startScrap, DEFENSE_BUDGET[startRaidSize] ?? 140));
+    const committed = Math.round(Math.min(startScrap, (DEFENSE_BUDGET[startRaidSize] ?? 140) + defenseBudgetBonus));
     s.scrap = committed;
     if (!budgetCommittedRef.current) {
       budgetCommittedRef.current = true;
@@ -820,7 +825,7 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
         const allSpawned = s.spawnQueue.every(q => q.spawned);
         if (allSpawned && s.enemies.length === 0) {
           // Wave-end scrap bonus — scales with hatch health (perfect defense = max reward)
-          const bonus = Math.round(20 + (s.hatchHp / 100) * 40);
+          const bonus = Math.round(20 + (s.hatchHp / s.hatchHpMax) * 40);
           s.scrap += bonus;
           setScrap(s.scrap);
           if (s.waveIdx >= s.totalWaves - 1) {
@@ -828,8 +833,12 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
             const salvage = SALVAGE_PER_WAVE_CLEARED * s.totalWaves;
             if (onScrapChange) onScrapChange(salvage);
             if (onRaidWon) {
+              // Report how the win went, so the colony can price it. Read the
+              // values now — `s` keeps mutating during the 2s delay below.
+              const wonWaves = s.totalWaves;
+              const wonHatchHp = Math.max(0, Math.round((s.hatchHp / s.hatchHpMax) * 100));
               const timeoutId = setTimeout(() => {
-                onRaidWon();
+                onRaidWon({ waves: wonWaves, hatchHp: wonHatchHp });
                 winLostTimeoutsRef.current = winLostTimeoutsRef.current.filter(id => id !== timeoutId);
               }, 2000);
               winLostTimeoutsRef.current.push(timeoutId);
@@ -898,7 +907,7 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
       ctx.fillText("▼ HATCH", HATCH_X, GROUND_Y - 9);
 
       // Hatch HP bar
-      const hpRatio = s.hatchHp / 100;
+      const hpRatio = s.hatchHp / s.hatchHpMax;
       ctx.fillStyle = "#050a05";
       ctx.fillRect(HATCH_X - 25, GROUND_Y - 20, 50, 5);
       ctx.fillStyle = hpRatio > 0.5 ? "#22cc44" : hpRatio > 0.25 ? "#cc8800" : "#cc2200";
@@ -1249,7 +1258,7 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
 
         {/* Hatch HP */}
         <div style={{ color: hatchHp < 40 ? "#cc2200" : "#22cc44", fontSize: 10, letterSpacing: 1, minWidth: 100 }}>
-          ▼ HATCH: {hatchHp}%
+          ▼ HATCH: {Math.round((hatchHp / (100 + hatchHpBonus)) * 100)}%
         </div>
 
         {/* Wave progress */}

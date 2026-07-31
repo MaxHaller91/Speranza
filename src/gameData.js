@@ -58,9 +58,9 @@ export const HEAT_RELIEF_RAID_SURVIVED = 0.35;
 export const HEAT_RELIEF_BARRICADE     = 0.15;
 
 /** Net heat change for one tick. Pure, so the tick loop stays testable. */
-export function calcHeatDelta({ builtRooms, sentryWorkers, threatMult = 1, suppressed = false }) {
+export function calcHeatDelta({ builtRooms, sentryWorkers, threatMult = 1, suppressed = false, heatGainMult = 1 }) {
   if (suppressed) return -HEAT_DECAY_PER_TICK;
-  const gross = (HEAT_BASE_GAIN + builtRooms * HEAT_GAIN_PER_ROOM) * threatMult;
+  const gross = (HEAT_BASE_GAIN + builtRooms * HEAT_GAIN_PER_ROOM) * threatMult * heatGainMult;
   const mitigation = Math.min(
     HEAT_SENTRY_MITIGATION_CAP,
     sentryWorkers * HEAT_SENTRY_MITIGATION,
@@ -116,6 +116,102 @@ export const DIFFICULTIES = {
 };
 export const DIFFICULTY_ORDER = ["settler", "survivor", "condemned"];
 export const DEFAULT_DIFFICULTY = "survivor";
+
+// ─── Resolve & Talents (meta-progression) ────────────────────────────────────
+// Surviving a raid used to pay nothing. The raid economy fix removed a broken
+// reward that paid 685-1289 scrap win *or lose*, which was right, but it left a
+// clean win netting about -15 scrap — you paid for turrets and got a thank-you.
+//
+// Resolve is deliberately NOT scrap. Scrap is run currency and more of it just
+// inflates the economy; Resolve is meta-progression, spent on permanent talents
+// that persist across colonies. Losing a colony keeps what you earned, which is
+// the point — a failed run still moves you forward.
+//
+// Named "Resolve" rather than anything Arc-derived: see the IP note in
+// plans/roadmap/README.md.
+export const RESOLVE_PER_WAVE = 1;
+export const RESOLVE_INTACT_BONUS = 3;   // hatch above 90%
+export const RESOLVE_HELD_BONUS   = 1;   // hatch above 50%
+
+/** Resolve earned for winning a raid. Pure so it can be unit-tested. */
+export function resolveEarned({ waves = 0, hatchHp = 0 } = {}) {
+  const base = Math.max(0, Math.round(waves)) * RESOLVE_PER_WAVE;
+  const bonus = hatchHp >= 90 ? RESOLVE_INTACT_BONUS
+              : hatchHp >= 50 ? RESOLVE_HELD_BONUS
+              : 0;
+  return base + bonus;
+}
+
+// Each talent modifies a value that already exists and is already isolated in a
+// pure helper. Nothing here introduces a new system.
+export const TALENTS = {
+  deepSilence: {
+    label: "Deep Silence", icon: "🔇", cost: 6,
+    desc: "Arc heat accumulates 15% more slowly.",
+    effect: "heatGainMult", value: 0.85,
+  },
+  rationing: {
+    label: "Rationing Discipline", icon: "🥫", cost: 8,
+    desc: "+4 ticks of empty stores before colonists start collapsing.",
+    effect: "collapseTicksBonus", value: 4,
+  },
+  fieldMedicine: {
+    label: "Field Medicine", icon: "⚕", cost: 6,
+    desc: "Infirmary staff heal 50% faster.",
+    effect: "healRateMult", value: 1.5,
+  },
+  standingReserve: {
+    label: "Standing Reserve", icon: "🔧", cost: 7,
+    desc: "+40 scrap of defense budget at the start of every raid.",
+    effect: "defenseBudgetBonus", value: 40,
+  },
+  integratedDesign: {
+    label: "Integrated Design", icon: "⚙", cost: 9,
+    desc: "Room adjacency bonuses are 60% stronger.",
+    effect: "adjacencyMult", value: 1.6,
+  },
+  hardenedHatch: {
+    label: "Hardened Hatch", icon: "🛡", cost: 8,
+    desc: "The surface hatch starts every raid with 130 HP instead of 100.",
+    effect: "hatchHpBonus", value: 30,
+  },
+  steadyHands: {
+    label: "Steady Hands", icon: "🧭", cost: 7,
+    desc: "Morale losses are reduced by 20%.",
+    effect: "moraleDrainMult", value: 0.8,
+  },
+  deepStores: {
+    label: "Deep Stores", icon: "📦", cost: 10,
+    desc: "A new colony begins with 60 extra scrap and food.",
+    effect: "startingStockBonus", value: 60,
+  },
+};
+export const TALENT_ORDER = [
+  "deepSilence", "rationing", "fieldMedicine", "standingReserve",
+  "integratedDesign", "hardenedHatch", "steadyHands", "deepStores",
+];
+
+/**
+ * Collapse a list of unlocked talent keys into the multipliers/bonuses the game
+ * reads. Returns neutral values when nothing is unlocked, so callers never need
+ * to special-case an empty list.
+ */
+export function talentEffects(unlocked = []) {
+  const e = {
+    heatGainMult: 1, collapseTicksBonus: 0, healRateMult: 1,
+    defenseBudgetBonus: 0, adjacencyMult: 1, hatchHpBonus: 0,
+    moraleDrainMult: 1, startingStockBonus: 0,
+  };
+  for (const key of unlocked) {
+    const t = TALENTS[key];
+    if (!t) continue;
+    // Multipliers compound; bonuses add. Only one talent touches each field
+    // today, but this keeps a second one from silently overwriting the first.
+    if (t.effect.endsWith("Mult")) e[t.effect] *= t.value;
+    else e[t.effect] += t.value;
+  }
+  return e;
+}
 
 // ─── T2 Tech Tree ─────────────────────────────────────────────────────────────
 export const T2_TECHS = {
@@ -373,7 +469,7 @@ export function neighboursOf(grid, r, c) {
  * Adjacency effects for one cell. Pure — feed it the grid and a position.
  * Returns multipliers/deltas plus readable notes for the tooltip.
  */
-export function calcAdjacency(grid, r, c) {
+export function calcAdjacency(grid, r, c, adjacencyMult = 1) {
   const cell = grid[r]?.[c];
   const result = { outputMult: 1, energyDelta: 0, moraleDelta: 0, healMult: 1, notes: [] };
   if (!cell?.type) return result;
@@ -392,10 +488,12 @@ export function calcAdjacency(grid, r, c) {
         (rule.self === "*consumer" ? (nDef.consumes?.energy ?? 0) > 0 : nDef.tag === rule.self);
       if (!forward && !backward) return;
 
-      if (rule.outputMult)  result.outputMult += rule.outputMult;
-      if (rule.energyDelta) result.energyDelta += rule.energyDelta;
-      if (rule.moraleDelta) result.moraleDelta += rule.moraleDelta;
-      if (rule.healMult)    result.healMult += rule.healMult;
+      // The Integrated Design talent scales how much each rule is worth. It
+      // scales penalties too — a stronger layout effect cuts both ways.
+      if (rule.outputMult)  result.outputMult += rule.outputMult * adjacencyMult;
+      if (rule.energyDelta) result.energyDelta += rule.energyDelta * adjacencyMult;
+      if (rule.moraleDelta) result.moraleDelta += rule.moraleDelta * adjacencyMult;
+      if (rule.healMult)    result.healMult += rule.healMult * adjacencyMult;
       result.notes.push({
         ruleId: rule.id,
         good: rule.good,
@@ -668,10 +766,10 @@ export function ticksToEmpty(amount, netPerTick) {
 }
 
 /** How dire things are, for both UI and tick-loop effects. */
-export function deprivationStage(deprivedTicks) {
+export function deprivationStage(deprivedTicks, collapseTicksBonus = 0) {
   if (deprivedTicks <= 0) return "none";
-  if (deprivedTicks < DEPRIVE_COLLAPSE_TICKS) return "warning";
-  if (deprivedTicks < DEPRIVE_DEATH_TICKS) return "collapsing";
+  if (deprivedTicks < DEPRIVE_COLLAPSE_TICKS + collapseTicksBonus) return "warning";
+  if (deprivedTicks < DEPRIVE_DEATH_TICKS + collapseTicksBonus) return "collapsing";
   return "dying";
 }
 

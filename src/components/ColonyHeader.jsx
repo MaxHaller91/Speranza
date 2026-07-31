@@ -31,7 +31,7 @@ export default function ColonyHeader({
   journalOpen, effectsOpen,
   onTimescale, onMusicVolume, onRecruit, onToggleJournal, onToggleEffects, onHoverMorale, onBugReport,
   saveLocked, saveLockReason, onSaveNow, onLoadAutosave, onExportSave, onImportSave, onDeleteAutosaves,
-  onOpenHelp,
+  onOpenHelp, resolve = 0, onOpenTalents,
 }) {
   const moraleColor = morale > 50 ? "#7ed321" : morale > 0 ? "#f5a623" : morale > -50 ? "#ff7744" : "#ff2222";
   const moraleTier  = morale > 75 ? "THRIVING" : morale > 25 ? "STABLE" : morale > 0 ? "UNEASY" : morale > -50 ? "STRAINED" : morale > -75 ? "FRACTURED" : "COLLAPSE";
@@ -196,6 +196,20 @@ export default function ColonyHeader({
                 letterSpacing: 0.5,
               }}
             >⌫</button>
+            <button
+              title="Talents - spend Resolve on permanent upgrades"
+              onClick={(e) => { e.stopPropagation(); onOpenTalents && onOpenTalents(); }}
+              style={{
+                background: resolve > 0 ? "#0d1a0d" : "#0a0f1a",
+                border: `1px solid ${resolve > 0 ? "#7ed32188" : "#1e3a5f"}`,
+                borderRadius: 3,
+                color: resolve > 0 ? "#7ed321" : "#3a5a7a",
+                padding: "2px 7px",
+                cursor: "pointer",
+                fontSize: 10,
+                fontFamily: "monospace",
+              }}
+            >{"✦"}{resolve > 0 ? ` ${resolve}` : ""}</button>
             <button
               title="Field Manual / How to Play"
               onClick={(e) => { e.stopPropagation(); onOpenHelp(); }}

@@ -64,6 +64,10 @@ difficulty options exist (not yet re-run), resources being floats at the source,
 roadmap steps 2, 3, 4, 5, 7–9b, expeditions phases 3–6, and the Arc Raiders IP
 rename before any store page exists.
 
+Roadmap 9a (talent points) is **done**: Resolve is earned only by winning
+raids, spent on 8 permanent talents, and lives in its own `speranza_meta`
+localStorage key so it survives losing a colony and is not carried by run saves.
+
 Pause ownership is **done** — see rule 3b above and `HANDOFF.md` §4c.
 
 ## Working patterns

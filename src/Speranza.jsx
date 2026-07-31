@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   startMusic, setMusicVolume, getMusicVolume,
   playBuild, playRaid, playInjury, playKill,
@@ -30,6 +30,7 @@ import {
   getHeatState, INJURY_TICKS_BASE, HEAL_RATE_NURSE,
   RAID_SIZES, RAID_SIZE_ORDER, RAID_LAUNCH_CHANCE,
   DIFFICULTIES, DIFFICULTY_ORDER, DEFAULT_DIFFICULTY,
+  TALENTS, TALENT_ORDER, talentEffects, resolveEarned,
   T2_TECHS, TRAITS, TRAIT_KEYS,
   makeColonist, ROOM_TYPES, EXCAVATION_DEFS,
   EXPEDITION_TYPES, EXPEDITION_ROLL_TABLES, applyMoraleModifier,
@@ -51,6 +52,7 @@ import SkyBackground   from './components/SkyBackground.jsx';
 import RaidBanner      from './components/RaidBanner.jsx';
 import GameOverModal   from './components/GameOverModal.jsx';
 import StartScreen     from './components/StartScreen.jsx';
+import TalentScreen    from './components/TalentScreen.jsx';
 import DilemmaModal    from './components/DilemmaModal.jsx';
 import TraitPicker     from './components/TraitPicker.jsx';
 import BuildMenu       from './components/BuildMenu.jsx';
@@ -156,6 +158,31 @@ export default function Speranza() {
   // also counts as starting — you already have a colony at that point.
   const [runStarted, setRunStarted] = useState(false);
 
+  // ── Meta-progression ──────────────────────────────────────────────────────
+  // Resolve and talents deliberately live OUTSIDE the run save. They survive
+  // losing a colony — that is the whole point of a roguelike meta-currency: a
+  // failed run still moves you forward. Stored under their own localStorage key
+  // so importing someone else's save cannot hand you their unlocks.
+  const META_KEY = "speranza_meta";
+  const [resolve, setResolve] = useState(0);
+  const [talents, setTalents] = useState([]);
+  const [talentScreenOpen, setTalentScreenOpen] = useState(false);
+  useEffect(() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem(META_KEY) || "{}");
+      if (Number.isFinite(raw.resolve)) setResolve(raw.resolve);
+      if (Array.isArray(raw.talents)) setTalents(raw.talents.filter(k => TALENTS[k]));
+    } catch { /* corrupt meta should never block starting a game */ }
+  }, []);
+  useEffect(() => {
+    try { localStorage.setItem(META_KEY, JSON.stringify({ resolve, talents })); } catch {}
+  }, [resolve, talents]);
+
+  // Every talent-modified value the game reads, in one place.
+  const effects = useMemo(() => talentEffects(talents), [talents]);
+  const effectsRef = useRef(effects);
+  useEffect(() => { effectsRef.current = effects; }, [effects]);
+
   // ── Pause ownership ───────────────────────────────────────────────────────
   // ONE place decides whether the clock runs. Previously five callers wrote
   // `timescale` independently — the help modal, an overlay effect that had
@@ -177,6 +204,10 @@ export default function Speranza() {
     : helpOpen                                  ? "help"
     : surfaceDefenseActive                      ? "surfaceDefense"
     : (buildMenu && selected && grid[selected.r]?.[selected.c] && !grid[selected.r][selected.c].type) ? "buildMenu"
+    // Talents sit low: it is a screen the player opened, so anything the *game*
+    // raised should be the reported reason when both are up. The clock stops
+    // either way — order only decides which cause gets named.
+    : talentScreenOpen                          ? "talents"
     : manualPause                               ? "manual"
     : null;
   const timescale = pauseReason ? 0 : speed;
@@ -558,8 +589,11 @@ export default function Speranza() {
   // indefinitely with no visible cause.
 
   const changeMorale = useCallback((delta, reason) => {
-    // Difficulty only softens losses, never amplifies gains.
-    const scaled = delta < 0 ? delta * diffConfigRef.current.moraleDrainMult : delta;
+    // Difficulty and the Steady Hands talent only soften losses, never amplify
+    // gains — otherwise "reduces morale loss" would also shrink every reward.
+    const scaled = delta < 0
+      ? delta * diffConfigRef.current.moraleDrainMult * effectsRef.current.moraleDrainMult
+      : delta;
     setMorale(prev => clamp(prev + scaled, -100, 100));
     moraleEventDeltasRef.current.push({ delta: scaled, reason: reason ?? "morale event" });
     if (Math.abs(scaled) >= 10) {
@@ -1019,7 +1053,7 @@ export default function Speranza() {
 
           // Where a room sits relative to its neighbours now changes what it
           // does — see calcAdjacency(). Columns used to be entirely inert.
-          const adj = calcAdjacency(g, ri, ci);
+          const adj = calcAdjacency(g, ri, ci, effectsRef.current.adjacencyMult);
 
           let canRun = true;
           for (const [r, amt] of Object.entries(def.consumes)) {
@@ -1140,7 +1174,7 @@ export default function Speranza() {
           const ticks = prevTicks + 1;
           deprivedTicksRef.current = ticks;
           setDeprivedTicks(ticks);
-          const stage = deprivationStage(ticks);
+          const stage = deprivationStage(ticks, effectsRef.current.collapseTicksBonus);
           const lack = noFood && noWater ? "FOOD AND WATER"
                      : noFood ? "FOOD" : "WATER";
 
@@ -1270,6 +1304,7 @@ export default function Speranza() {
           sentryWorkers: sentryCount,
           threatMult: condThreatMult * diffConfigRef.current.heatMult,
           suppressed: heatGainSuppressed,
+          heatGainMult: effectsRef.current.heatGainMult,
         });
         const nextHeat = clamp(heatRef.current + heatDelta, 0, HEAT_MAX);
         setHeat(nextHeat);
@@ -1547,7 +1582,7 @@ export default function Speranza() {
       g.forEach((row, ri) => row.forEach((cell, ci) => {
         if (cell.type !== "hospital") return;
         nursesAvailable += cell.workers;
-        bedsideMult = Math.max(bedsideMult, calcAdjacency(g, ri, ci).healMult);
+        bedsideMult = Math.max(bedsideMult, calcAdjacency(g, ri, ci, effectsRef.current.adjacencyMult).healMult);
       }));
 
       // Work out the healing result first, then apply it as a pure patch map.
@@ -1564,7 +1599,7 @@ export default function Speranza() {
         cols.forEach(col => {
           if (col.status !== "injured") return;
           // IRON LUNGS: heals 2× faster
-          const baseHeal = nurseCapacity > 0 ? (nurseCapacity--, HEAL_RATE_NURSE) : 1;
+          const baseHeal = (nurseCapacity > 0 ? (nurseCapacity--, HEAL_RATE_NURSE) : 1) * effectsRef.current.healRateMult;
           let healRate = col.traits?.includes("ironLungs") ? baseHeal * 2 : baseHeal;
           // Quirk: workaholic heals 25% slower, insomniac heals 15% slower
           if (col.quirk?.id === "workaholic")  healRate *= 0.75;
@@ -2011,9 +2046,20 @@ export default function Speranza() {
     playRepair();
   };
 
-  const handleSurfaceRaidWon = () => {
+  const handleSurfaceRaidWon = (outcome = {}) => {
     pushEventTrace("raid_resolved_won", null, null);
     const wonSize = pendingRaidSize;
+    // Resolve: the reward for surviving. Before this a clean win netted about
+    // -15 scrap, so the best raid was one that never happened.
+    const earned = resolveEarned(outcome);
+    if (earned > 0) {
+      setResolve(prev => prev + earned);
+      addLog(`✦ +${earned} Resolve — the colony holds.`);
+      addToast(
+        `✦ +${earned} RESOLVE\n${outcome.waves ?? 0} waves cleared, hatch at ${outcome.hatchHp ?? 0}%.\nSpend it on permanent talents.`,
+        "success", { key: `resolve-${tickRef.current}` },
+      );
+    }
     setSurfaceDefenseActive(false);
     setPendingRaidSize(null);
     setPendingWealthBracket(0);
@@ -2317,7 +2363,10 @@ ${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelte
   const handleRestart = (nextDifficulty = difficulty) => {
     const nextDiffConfig = DIFFICULTIES[nextDifficulty] ?? DIFFICULTIES[DEFAULT_DIFFICULTY];
     setGrid(initGrid());
-    setRes(INIT_RES);
+    // Deep Stores (talent) front-loads a new colony. Resolve and talents are
+    // NOT reset here — they are meta-progression and survive losing a colony.
+    const stock = effectsRef.current.startingStockBonus;
+    setRes(stock > 0 ? { ...INIT_RES, scrap: INIT_RES.scrap + stock, food: INIT_RES.food + stock } : INIT_RES);
     setColonists(initColonists());
     setHeat(0);
     setExpeditions([]);
@@ -2365,6 +2414,17 @@ ${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelte
     setSurfaceDefenseActive(false);
     setPendingRaidSize(null);
     setPendingWealthBracket(0);
+  };
+
+  const handleUnlockTalent = (key) => {
+    const t = TALENTS[key];
+    // Guard rather than trust the button's disabled state — the dev hook and a
+    // future keyboard path can both reach this without going through the UI.
+    if (!t || talents.includes(key) || resolve < t.cost) return;
+    setResolve(prev => prev - t.cost);
+    setTalents(prev => [...prev, key]);
+    addLog(`✦ Talent unlocked: ${t.label}.`);
+    playLevelUp();
   };
 
   // Pressing BEGIN on the start screen. Routed through handleRestart so the
@@ -2447,7 +2507,7 @@ ${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelte
           // This is the SAME value the game runs on, not a second copy of the
           // rules — the two used to be able to drift apart.
           activeDilemma, milestoneToast, helpOpen, buildMenu, selected,
-          speed, manualPause,
+          speed, manualPause, resolve, talents, effects,
           pauseCause: pauseReason,
     }),
       // Actions that bypass UI state, so a harness never has to fake clicks.
@@ -2475,6 +2535,8 @@ ${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelte
       // expeditions and milestones at all, so it needs this lever too.
       // Same caveat as sandboxTopUp: never judge balance from a run that used it.
       sandboxMorale: (floor = 40) => setMorale(prev => Math.max(prev, floor)),
+      unlockTalent: handleUnlockTalent,
+      grantResolve: (n = 20) => setResolve(prev => prev + n),
   };
 
   useEffect(() => {
@@ -2493,6 +2555,8 @@ ${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelte
       restart:       call("restart"),
       sandboxTopUp:  call("sandboxTopUp"),
       sandboxMorale: call("sandboxMorale"),
+      unlockTalent:  call("unlockTalent"),
+      grantResolve:  call("grantResolve"),
     };
   }, []);
 
@@ -2515,6 +2579,8 @@ ${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelte
         colonyName={colonyName}
         difficultyLabel={diffConfig.label}
         onRenameColony={setColonyName}
+        resolve={resolve}
+        onOpenTalents={() => setTalentScreenOpen(true)}
         timescale={timescale}
         musicVolume={musicVolume}
         res={res}
@@ -2563,6 +2629,15 @@ ${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelte
 
       {!runStarted && <StartScreen onBegin={handleBegin} />}
 
+      {talentScreenOpen && (
+        <TalentScreen
+          resolve={resolve}
+          talents={talents}
+          onUnlock={handleUnlockTalent}
+          onClose={() => setTalentScreenOpen(false)}
+        />
+      )}
+
       <GameOverModal gameOver={gameOver} historyLog={historyLog} colonyName={colonyName} onRestart={handleRestart} />
 
       <DilemmaModal activeDilemma={activeDilemma} onChoice={handleDilemmaChoice} />
@@ -2601,6 +2676,8 @@ ${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelte
             wealthBracket={pendingWealthBracket}
             waveMult={diffConfig.waveMult}
             sentryWorkers={sentryWorkers}
+            defenseBudgetBonus={effects.defenseBudgetBonus}
+            hatchHpBonus={effects.hatchHpBonus}
             active={surfaceDefenseActive}
             onRaidWon={handleSurfaceRaidWon}
             onRaidLost={handleSurfaceRaidLost}

@@ -254,6 +254,64 @@ telling the player the game was paused while it kept running — spotted in a
 screenshot with `pauseCause: null` and the clock ticking. Replaced with an
 honest notification count.
 
+## Talent Points / Resolve (roadmap 9a) - 2026-07-31 (opus-5)
+
+Winning a raid used to pay nothing. The raid economy fix in `32e7bcc` correctly
+removed a reward that paid 685-1289 scrap win *or lose*, but nothing replaced
+it, so a clean win netted about -15 scrap and the best raid was one that never
+happened.
+
+**Resolve** is a meta-currency earned only by repelling raids:
+`resolveEarned({waves, hatchHp})` = 1 per wave cleared, +3 if the hatch finished
+above 90%, +1 above 50%. Deliberately not scrap - more scrap just inflates the
+run economy, whereas Resolve is progression.
+
+Eight talents (`TALENTS` in `gameData.js`), each modifying a value that already
+existed inside a pure helper. Nothing here adds a new system:
+
+| talent | hooks into |
+|---|---|
+| Deep Silence | `calcHeatDelta` heatGainMult |
+| Rationing Discipline | `deprivationStage` collapse threshold |
+| Field Medicine | `HEAL_RATE_NURSE` |
+| Standing Reserve | `DEFENSE_BUDGET` |
+| Integrated Design | `calcAdjacency` rule strength |
+| Hardened Hatch | minigame `hatchHpMax` |
+| Steady Hands | `changeMorale` negative deltas |
+| Deep Stores | `INIT_RES` on a new colony |
+
+`talentEffects(unlocked)` collapses the list into one object of
+multipliers/bonuses, with neutral defaults so no caller special-cases an empty
+list. Multipliers compound, bonuses add.
+
+**Restart behaviour, decided deliberately (the plan doc asked for this):**
+Resolve and talents are meta-progression and **survive losing a colony**. They
+live under their own `speranza_meta` localStorage key, NOT in the run save - so
+importing someone else's save file cannot hand you their unlocks. `handleRestart`
+does not reset them. Verified in-browser: bought two talents, starved the colony
+to death, started a new one, both still owned.
+
+### Verification
+
+- `resolveEarned` - 7 cases including both bonus thresholds and empty input, all pass.
+- `talentEffects` - neutral when empty, correct when all 8 owned, unknown keys ignored.
+- Purchase guards - cannot buy twice, cannot buy unaffordable (checked in the
+  handler, not just the button's disabled state).
+- **The effect actually reaches the simulation**, measured rather than assumed:
+  heat gain 1.35/tick without Deep Silence, 1.1025/tick with. Solving both gives
+  gross 1.65 and decay 0.3, and `0.85 x 1.65 - 0.3 = 1.1025` exactly. Net heat
+  falls slightly more than 15% because decay is unchanged - correct, since the
+  talent scales gain.
+- Economy: 61 Resolve buys the whole tree, about 7.6 perfect medium raids.
+
+### Incidentally proved the new pause model
+
+The talent screen is a pause reason - one line. With a dilemma stacked on top of
+it, answering the dilemma left the clock stopped, and it only resumed (at the
+original 10x) when the last overlay closed. That is exactly the "one overlay
+resumes beneath another" failure `plans/expedition-decisions-v2.md` line 370
+warned about, now structurally impossible.
+
 ## Known Issues / Limitations ⚠️
 
 ### Save System Validation Pending
