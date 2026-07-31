@@ -52,6 +52,8 @@ options exist and the clock has a single owner.
 - [ ] **Step 5** — Morale visible as behaviour · `05-morale-as-behaviour.md`
 - [ ] **Step 7** — Variable room sizes (silhouette) · `07-variable-room-sizes.md`
 - [ ] **Step 8** — Per-cell excavation (player-carved shape) · `08-per-cell-excavation.md`
+- [ ] **Step 10** — Sustained pressure: the colony is currently solved once
+      hydro + water are staffed · `10-sustained-pressure.md`
 - [ ] **Step 9b** — 2-D tower-defense placement (gated) · `09-talent-points-and-td-depth.md`
 - [ ] Expeditions phases 3–6 · `../expedition-decisions-v2.md`
 - [ ] IP rename pass — see below
