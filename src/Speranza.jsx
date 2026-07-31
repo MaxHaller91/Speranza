@@ -2331,6 +2331,48 @@ ${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelte
 
 
 
+  // ── Dev-only inspection hook ──────────────────────────────────────────────
+  // Long playtests previously had to scrape rendered text to work out what the
+  // colony was doing, which is fragile and misses anything not on screen. This
+  // exposes the real state so a test harness can assert on it directly.
+  // Stripped from production builds by the import.meta.env.DEV guard.
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    window.__speranza = {
+      get state() {
+        return {
+          tick, day: Math.floor(tick / 48) + 1, timescale,
+          colonyName, res, heat, morale,
+          colonists, popCap, totalColonists, unassigned,
+          grid, unlockedRows, excavations,
+          expeditions, surfaceHaul, unlockedTechs,
+          raidWindow, activeRaid, surfaceDefenseActive, pendingRaidSize,
+          deprivedTicks, memorial, firedMilestones, historyLog,
+          gameOver, log,
+        };
+      },
+      // Actions that bypass UI state, so a harness never has to fake clicks.
+      setTimescale,
+      build: (r, c, type) => { setSelected({ r, c }); setTimeout(() => handleBuild(type), 0); },
+      assign: handleAssign,
+      recruit: handleRecruit,
+      launch: handleLaunchExpedition,
+      setCrew: setExpedCrewIds,
+      setLocation: setExpedLocationId,
+      restart: handleRestart,
+      // Sandbox helper for long soak tests: keeps a colony alive so the raid,
+      // expedition, milestone and save systems can be exercised over many days
+      // without the test also having to play well. Never use it to judge balance.
+      sandboxTopUp: (floor = 120) => setRes(prev => ({
+        ...prev,
+        energy: Math.max(prev.energy, floor),
+        food:   Math.max(prev.food,   floor),
+        water:  Math.max(prev.water,  floor),
+        scrap:  Math.max(prev.scrap,  floor),
+      })),
+    };
+  });
+
   // ── JSX ───────────────────────────────────────────────────────────────────
   return (
     <div onClick={handleFirstInteraction} style={{
@@ -2530,17 +2572,13 @@ ${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelte
       <ToastPanel
         toasts={toasts}
         milestoneToast={milestoneToast}
-        onDismiss={(id) => {
-          setToasts(prev => {
-            const next = prev.filter(t => t.id !== id);
-            if (next.length === 0) setTimescale(timescaleBeforeToastRef.current);
-            return next;
-          });
-        }}
-        onDismissAll={() => {
-          setToasts([]);
-          setTimescale(timescaleBeforeToastRef.current);
-        }}
+        /* Toasts are notifications, not overlays — they are NOT in popupActive
+           and must not touch the clock. These handlers used to call
+           setTimescale(timescaleBeforeToastRef.current), a ref that defaults to
+           1 and only updates when a real overlay opens, so dismissing a toast
+           at 10x silently dropped you back to 1x with no indication. */
+        onDismiss={(id) => setToasts(prev => prev.filter(t => t.id !== id))}
+        onDismissAll={() => setToasts([])}
       />
 
     </div>
