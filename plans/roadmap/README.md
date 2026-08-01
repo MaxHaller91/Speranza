@@ -36,17 +36,31 @@ first** — it contains two invariants that, if broken, silently corrupt the gam
 - [x] Start screen + pause-ownership consolidation — difficulty is now pickable
       on a first colony instead of only after dying once; five independent
       `setTimescale` callers reduced to one owner
+- [x] Floats fixed at source + Traders wired — **Step 2a**
+- [x] Artifacts wired, plus a level-up announcement bug it exposed — **Step 2b**
+- [x] Colony Directives wired — **Step 2c**: 7 toggleable standing orders
+      (`DIRECTIVES` in `speranza-lore.js`), max 3 active, gated on a built
+      Research Lab, mechanics in `directiveEffects()`/`DIRECTIVE_MECHANICS`
+      (`gameData.js`). See `memory-bank/progress.md` "Colony Directives" for the
+      in-browser numeric verification.
 
 ### Next
 
-Highest value now: **re-run the long playtest to a continuous day 25**. It is a
-verification pass rather than a roadmap step (see `HANDOFF.md` §4a), but it is
-the thing most likely to find real bugs, and both blockers are gone — difficulty
-options exist and the clock has a single owner.
+Step 2 is one sub-step from done: **2d, Arc Commanders**, is the last unwired
+lore export (`COMMANDER_NAMES`/`COMMANDER_WEAKNESSES`/`COMMANDER_STRENGTHS`).
+It is the biggest of the four per `02-wire-unused-lore.md` — do it on its own,
+not bundled with something else.
+
+Also still open: **re-run the long playtest to a continuous day 25**. It is a
+verification pass rather than a roadmap step (see `HANDOFF.md` §4a) and is
+expensive to run unattended — the harness has to answer dilemmas, trait picks,
+*and* play the real-time canvas raid minigame, none of which can be scripted as
+cheaply as the dev-hook actions used to verify Directives. Both mechanical
+blockers (difficulty options, single clock owner) are gone; what is missing is
+an interactive harness or a human playtest session.
 
 9b (2-D tower-defense placement) stays gated behind that day-25 playtest.
 
-- [ ] **Step 2** — Wire the unused lore content · `02-wire-unused-lore.md`
 - [ ] **Step 3** — UI scale pass for Steam · `03-ui-scale-pass.md`
 - [ ] **Step 4** — Game-over as an obituary · `04-game-over-obituary.md`
 - [ ] **Step 5** — Morale visible as behaviour · `05-morale-as-behaviour.md`

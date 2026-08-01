@@ -276,6 +276,46 @@ export const TALENT_ORDER = [
   "integratedDesign", "hardenedHatch", "steadyHands", "deepStores",
 ];
 
+// ─── Colony Directives ────────────────────────────────────────────────────────
+// DIRECTIVES (speranza-lore.js) carries the flavor text and the cost/benefit
+// labels shown in the panel; the numbers those labels describe live here in
+// one place, so copy and simulation can't drift apart the way a hardcoded
+// duplicate in two files eventually would.
+export const DIRECTIVE_MECHANICS = {
+  overtime:       { productionMult: 1.20, workingMoraleDrainPerCol: 0.2 },
+  rationing:      { foodDrainMult: 0.60, flatMoraleDrain: 0.3 },
+  conscription:   { autoAssign: true, flatMoraleDrain: 0.1 },
+  lockdown:       { expeditionsBlocked: true, heatGainMult: 0.50 },
+  openComms:      { heatFlatPerTick: 0.15, expedGoodMult: 1.15 },
+  combatDrills:   { scrapDrainPerTick: 2, injuryChanceMult: 0.85 },
+  triageProtocol: { productionMult: 0.90, healRateMult: 1.50 },
+};
+export const MAX_ACTIVE_DIRECTIVES = 3;
+
+/**
+ * Collapse the active directive ids into the multipliers/bonuses the tick
+ * loop reads. Same shape as talentEffects(): neutral defaults so callers
+ * never special-case an empty list, multipliers compound, flat bonuses add.
+ */
+export function directiveEffects(active = []) {
+  const e = {
+    productionMult: 1, foodDrainMult: 1, autoAssign: false,
+    expeditionsBlocked: false, heatGainMult: 1, heatFlatPerTick: 0,
+    expedGoodMult: 1, injuryChanceMult: 1, healRateMult: 1,
+    scrapDrainPerTick: 0, workingMoraleDrainPerCol: 0, flatMoraleDrain: 0,
+  };
+  for (const id of active) {
+    const m = DIRECTIVE_MECHANICS[id];
+    if (!m) continue;
+    for (const [key, val] of Object.entries(m)) {
+      if (typeof val !== "number") { e[key] = val; continue; }
+      if (key.endsWith("Mult")) e[key] *= val;
+      else e[key] += val;
+    }
+  }
+  return e;
+}
+
 /**
  * Collapse a list of unlocked talent keys into the multipliers/bonuses the game
  * reads. Returns neutral values when nothing is unlocked, so callers never need

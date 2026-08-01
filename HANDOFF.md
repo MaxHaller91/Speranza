@@ -52,8 +52,12 @@ script in the master roadmap must report `0`.
 Done on this branch: colonist→room assignment model, animated colonist sprites,
 heat/raid rebalance, starvation as a survivable process, StrictMode purity sweep
 (11 sites), base-defense minigame depth, expeditions phases 1–2, room adjacency,
-colony naming, two playtest bug passes (ten bugs), a soak-test harness, and
-**difficulty options** (roadmap step 6 — settler/survivor/condemned).
+colony naming, two playtest bug passes (ten bugs), a soak-test harness,
+**difficulty options** (roadmap step 6 — settler/survivor/condemned),
+**talent points** (roadmap 9a — Resolve earned by repelling raids), a start
+screen with pause-ownership consolidation, and **roadmap step 2a–2c** (Traders,
+Artifacts, Colony Directives — the last unwired lore content is 2d, Arc
+Commanders).
 
 Full commit list and detail: `plans/roadmap/README.md` and
 `memory-bank/progress.md`.
@@ -61,6 +65,15 @@ Full commit list and detail: `plans/roadmap/README.md` and
 ---
 
 ## 4. Open threads, highest value first
+
+### 0) Roadmap step 2d — Arc Commanders (last unwired lore content)
+
+`02-wire-unused-lore.md`'s 2a (Traders), 2b (Artifacts), and 2c (Colony
+Directives) are all done — see `memory-bank/progress.md` for each. 2d is what's
+left: named raid leaders (`COMMANDER_NAMES`/`COMMANDER_WEAKNESSES`/
+`COMMANDER_STRENGTHS` in `speranza-lore.js`) attached to a raid at heat 600+
+after 5+ raids, feeding the dormant `commandersKilled` milestone trigger. The
+plan doc flags this as the biggest of the four sub-steps — do it on its own.
 
 ### a) The 25-day soak test — **difficulty options landed; re-run not yet done**
 
@@ -134,11 +147,14 @@ Related observation worth keeping: a tick appears to cost ~1s of main-thread
 work in dev, against a 400ms production budget. There is not much headroom —
 this will matter for bigger colonies or a faster speed setting.
 
-### b) Resources are floats at the source
+### b) Resources are floats at the source — DONE
 
-`food: 57.599999999999994`, `energy: 86.80000000000001`. Only the minigame's
-*display* was rounded. The underlying values carry the error everywhere, so it
-can surface in any new UI. Fix at the source in the tick loop's resource maths.
+Fixed in `fd884ff` ("Round resources at source, and put the traders to work").
+`roundRes()` in `gameData.js` runs once at the end of the tick's `setRes`
+updater, after every drain and production has landed. This section had gone
+stale — the fix landed a session before this note was corrected. See
+`memory-bank/progress.md` "Floats fixed at source + Traders wired" for the
+verification.
 
 ### c) Pause ownership — DONE
 
@@ -166,9 +182,9 @@ decision prompts can now be a pause reason without touching the clock.
 
 ### d) Everything else
 
-`plans/roadmap/` steps 2–9, expeditions phases 3–6
-(`plans/expedition-decisions-v2.md`), and the Arc Raiders IP rename, which
-should happen before any store page exists.
+`plans/roadmap/` step 2d (Arc Commanders — see §0 above) plus steps 3–5, 7–9b,
+expeditions phases 3–6 (`plans/expedition-decisions-v2.md`), and the Arc
+Raiders IP rename, which should happen before any store page exists.
 
 ---
 

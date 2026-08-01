@@ -34,6 +34,7 @@ import {
   TRADER_CHECK_EVERY, TRADER_CHANCE, TRADER_STAY_TICKS, traderOffersFor, canAffordOffer,
   ARTIFACT_EVERY_N_LEVELS, makeArtifact,
   TALENTS, TALENT_ORDER, talentEffects, resolveEarned,
+  directiveEffects, MAX_ACTIVE_DIRECTIVES,
   T2_TECHS, TRAITS, TRAIT_KEYS,
   makeColonist, ROOM_TYPES, EXCAVATION_DEFS,
   EXPEDITION_TYPES, EXPEDITION_ROLL_TABLES, applyMoraleModifier,
@@ -56,6 +57,7 @@ import RaidBanner      from './components/RaidBanner.jsx';
 import GameOverModal   from './components/GameOverModal.jsx';
 import StartScreen     from './components/StartScreen.jsx';
 import TalentScreen    from './components/TalentScreen.jsx';
+import DirectivesScreen from './components/DirectivesScreen.jsx';
 import TraderModal     from './components/TraderModal.jsx';
 import DilemmaModal    from './components/DilemmaModal.jsx';
 import TraitPicker     from './components/TraitPicker.jsx';
@@ -193,6 +195,18 @@ export default function Speranza() {
   const effectsRef = useRef(effects);
   useEffect(() => { effectsRef.current = effects; }, [effects]);
 
+  // ── Colony directives ─────────────────────────────────────────────────────
+  // Toggleable standing orders, up to MAX_ACTIVE_DIRECTIVES at once. Unlike
+  // talents/Resolve these ARE run state — they reset on restart and travel
+  // with the save, the same as unlockedTechs.
+  const [activeDirectives, setActiveDirectives] = useState([]);
+  const [directivesScreenOpen, setDirectivesScreenOpen] = useState(false);
+  const activeDirectivesRef = useRef(activeDirectives);
+  useEffect(() => { activeDirectivesRef.current = activeDirectives; }, [activeDirectives]);
+  const directiveFx = useMemo(() => directiveEffects(activeDirectives), [activeDirectives]);
+  const directiveFxRef = useRef(directiveFx);
+  useEffect(() => { directiveFxRef.current = directiveFx; }, [directiveFx]);
+
   // ── Pause ownership ───────────────────────────────────────────────────────
   // ONE place decides whether the clock runs. Previously five callers wrote
   // `timescale` independently — the help modal, an overlay effect that had
@@ -219,6 +233,7 @@ export default function Speranza() {
     // raised should be the reported reason when both are up. The clock stops
     // either way — order only decides which cause gets named.
     : talentScreenOpen                          ? "talents"
+    : directivesScreenOpen                      ? "directives"
     : manualPause                               ? "manual"
     : null;
   const timescale = pauseReason ? 0 : speed;
@@ -458,6 +473,7 @@ export default function Speranza() {
       tradersVisited,
       artifacts,
       activeDilemma,
+      activeDirectives,
     };
 
     return {
@@ -495,6 +511,7 @@ export default function Speranza() {
       artifacts: s.artifacts,
       activeTrader: null,  // a visitor does not survive a reload
       activeDilemma: s.activeDilemma,
+      activeDirectives: s.activeDirectives,
       activeRaid: null,
       raidWindow: null,
       surfaceDefenseActive: false,
@@ -509,7 +526,7 @@ export default function Speranza() {
     surfaceCondition, surfaceConditionTimer, peakPopulation,
     firedMilestones, firedDilemmas, recentDilemmaOutcomes,
     historyLog, heatSuppressedTicks, deprivedTicks, dilemmaTimer, activeDilemma,
-    traderTimer, tradersVisited, artifacts,
+    traderTimer, tradersVisited, artifacts, activeDirectives,
   ]);
 
   const buildSavePayload = useCallback((source = null) => ({
@@ -859,6 +876,13 @@ export default function Speranza() {
       artifactsRef.current = Array.isArray(state.artifacts) ? state.artifacts : [];
       setActiveTrader(null); activeTraderRef.current = null;
       setActiveDilemma(state.activeDilemma ?? null);
+      {
+        const loadedDirectives = Array.isArray(state.activeDirectives)
+          ? state.activeDirectives.filter(id => DIRECTIVES.some(d => d.id === id))
+          : [];
+        setActiveDirectives(loadedDirectives);
+        activeDirectivesRef.current = loadedDirectives;
+      }
 
       // v1 normalization safety: never restore live raid/minigame runtime
       setRaidWindow(null);
@@ -1030,11 +1054,20 @@ export default function Speranza() {
         // isn't a "drain" and shouldn't be softened away by an easier setting.
         const adjMoraleRaw   = calcAdjacencyMorale(g);
         const adjMorale      = adjMoraleRaw < 0 ? adjMoraleRaw * diffMoraleDrainMult : adjMoraleRaw;
-        const netMoraleDelta = moraleGain - moraleDrain + adjMorale;
+        // Colony directives cost morale, softened by the same difficulty and
+        // Steady Hands levers as every other negative delta — see changeMorale().
+        const workingCount   = cols.filter(c => c.status === "working").length;
+        const directiveMoraleRaw = workingCount * directiveFxRef.current.workingMoraleDrainPerCol
+          + directiveFxRef.current.flatMoraleDrain;
+        const directiveMorale = directiveMoraleRaw > 0
+          ? -directiveMoraleRaw * diffMoraleDrainMult * effectsRef.current.moraleDrainMult
+          : 0;
+        const netMoraleDelta = moraleGain - moraleDrain + adjMorale + directiveMorale;
         if (moraleGain > 0) moraleTickBreakdown.plus.push(`Comfort services staffed +${moraleGain.toFixed(1)}`);
         if (moraleDrain > 0) moraleTickBreakdown.minus.push(`Crowding strain -${moraleDrain.toFixed(1)}`);
         if (adjMorale < 0)   moraleTickBreakdown.minus.push(`Noisy neighbours ${adjMorale.toFixed(1)}`);
         if (adjMorale > 0)   moraleTickBreakdown.plus.push(`Good layout +${adjMorale.toFixed(1)}`);
+        if (directiveMorale < 0) moraleTickBreakdown.minus.push(`Colony directives ${directiveMorale.toFixed(1)}`);
         moraleTickBreakdown.net += netMoraleDelta;
         setMorale(prev => clamp(prev + netMoraleDelta, -100, 100));
         const veteranCount = cols.filter(c => c.traits?.includes("veteran")).length;
@@ -1057,6 +1090,30 @@ export default function Speranza() {
         if (quirkMoraleDelta !== 0) {
           moraleTickBreakdown.net += quirkMoraleDelta;
           setMorale(prev => clamp(prev + quirkMoraleDelta, -100, 100));
+        }
+      }
+
+      // 0b. Conscription — fill open room slots with idle colonists ─────────
+      // Fully deterministic given g/cols (both snapshotted above), so this is
+      // safe to decide and apply here even though StrictMode double-invokes
+      // the tick — same inputs, same pairing, every time.
+      if (directiveFxRef.current.autoAssign) {
+        const openSlots = [];
+        g.forEach((row, ri) => row.forEach((cell, ci) => {
+          if (!cell.type) return;
+          const def = ROOM_TYPES[cell.type];
+          if (def.special === "barracks") return;
+          for (let i = cell.workers; i < (def.cap ?? 0); i++) openSlots.push({ r: ri, c: ci, type: cell.type });
+        }));
+        const idle = cols.filter(c => c.status === "idle");
+        const n = Math.min(openSlots.length, idle.length);
+        if (n > 0) {
+          const pairs = new Map(idle.slice(0, n).map((c, i) => [c.id, openSlots[i]]));
+          setColonists(prev => prev.map(c => {
+            const slot = pairs.get(c.id);
+            if (!slot) return c;
+            return { ...c, status: postStatusFor(slot.type), assignedRoom: { r: slot.r, c: slot.c }, previousRoom: { r: slot.r, c: slot.c } };
+          }));
         }
       }
 
@@ -1105,7 +1162,7 @@ export default function Speranza() {
             if (r === "energy" || r === "food" || r === "water") pushReason(r, -used, `${def.label} upkeep`);
           }
           for (const [r, amt] of Object.entries(def.produces)) {
-            const made = amt * cell.workers * adj.outputMult;
+            const made = amt * cell.workers * adj.outputMult * directiveFxRef.current.productionMult;
             next[r] = clamp(next[r] + made, 0, MAX_RES);
             flow[r] += made;
             if (r === "energy" || r === "food" || r === "water") pushReason(r, made, `${def.label} output`);
@@ -1166,12 +1223,19 @@ export default function Speranza() {
           let drain = 0;
           cols.forEach(c => {
             let mult = (c.quirk?.id === "ironStomach" && (r === "food" || r === "water")) ? 0.7 : 1.0;
-            if (r === "food") mult *= condFoodMult;
+            if (r === "food") mult *= condFoodMult * directiveFxRef.current.foodDrainMult;
             drain += amt * mult;
           });
           next[r]  = clamp(next[r] - drain, 0, MAX_RES);
           flow[r] -= drain;
           if (r === "energy" || r === "food" || r === "water") pushReason(r, -drain, "Colony upkeep");
+        }
+
+        // Combat Drills directive: flat scrap upkeep for continuous training.
+        if (directiveFxRef.current.scrapDrainPerTick > 0) {
+          const d = directiveFxRef.current.scrapDrainPerTick;
+          next.scrap = clamp(next.scrap - d, 0, MAX_RES);
+          flow.scrap -= d;
         }
 
         // Morale production bonus — morale > 75 gives +10% of positive flow
@@ -1343,8 +1407,8 @@ export default function Speranza() {
           sentryWorkers: sentryCount,
           threatMult: condThreatMult * diffConfigRef.current.heatMult,
           suppressed: heatGainSuppressed,
-          heatGainMult: effectsRef.current.heatGainMult,
-        });
+          heatGainMult: effectsRef.current.heatGainMult * directiveFxRef.current.heatGainMult,
+        }) + (heatGainSuppressed ? 0 : directiveFxRef.current.heatFlatPerTick);
         const nextHeat = clamp(heatRef.current + heatDelta, 0, HEAT_MAX);
         setHeat(nextHeat);
 
@@ -1444,10 +1508,14 @@ export default function Speranza() {
               const roll = Math.random();
               // HARDENED: injury window shrinks from 30% to 20% (0.50–0.70 instead of 0.50–0.80)
               const injureThreshold = target.traits?.includes("hardened") ? 0.70 : 0.80;
+              // Combat Drills directive shrinks the injury window from the flee
+              // side, growing the safe "held/fled" outcome instead — the kill
+              // zone above injureThreshold is untouched.
+              const fleeThreshold = injureThreshold - (injureThreshold - 0.50) * directiveFxRef.current.injuryChanceMult;
               // Quirk: steadyHands — kills become injuries, injuries become flee
               const isParanoid     = target.quirk?.id === "paranoid";
               const isSteadyHands  = target.quirk?.id === "steadyHands";
-              if (roll < 0.50) {
+              if (roll < fleeThreshold) {
                 // VETERAN or PARANOID: holds post — never flees
                 if (target.traits?.includes("veteran") || isParanoid) {
                   addLog(`  → ${target.name} held their post — ${isParanoid ? "too stubborn to run" : "veteran resolve"}.`);
@@ -1577,11 +1645,9 @@ export default function Speranza() {
             day:                  Math.floor(tickRef.current / 48) + 1,
             morale:               moraleRef.current,
             schematics:           surfaceHaulRef.current.schematics.length,
-          tradersVisited:       tradersVisitedRef.current,
-          artifacts:            artifactsRef.current.length,
             tradersVisited:       tradersVisitedRef.current,
-          artifacts:            artifactsRef.current.length,
             artifacts:            artifactsRef.current.length,
+            directivesActive:     activeDirectivesRef.current.length,
             t3Built:              0,
           });
         } else {
@@ -1602,7 +1668,11 @@ export default function Speranza() {
           {
             colonists: colonistsRef.current,
             ownedSchematics: surfaceHaulRef.current.schematics,
-            condEffects: surfaceConditionRef.current.effects,
+            condEffects: {
+              ...surfaceConditionRef.current.effects,
+              // Open Comms directive: broadcasting improves topside coordination.
+              expedGoodMult: (surfaceConditionRef.current.effects.expedGoodMult ?? 1.0) * directiveFxRef.current.expedGoodMult,
+            },
             tick: tickRef.current,
             memorialHall: hasMemorialHall(),
           },
@@ -1643,7 +1713,7 @@ export default function Speranza() {
         cols.forEach(col => {
           if (col.status !== "injured") return;
           // IRON LUNGS: heals 2× faster
-          const baseHeal = (nurseCapacity > 0 ? (nurseCapacity--, HEAL_RATE_NURSE) : 1) * effectsRef.current.healRateMult;
+          const baseHeal = (nurseCapacity > 0 ? (nurseCapacity--, HEAL_RATE_NURSE) : 1) * effectsRef.current.healRateMult * directiveFxRef.current.healRateMult;
           let healRate = col.traits?.includes("ironLungs") ? baseHeal * 2 : baseHeal;
           // Quirk: workaholic heals 25% slower, insomniac heals 15% slower
           if (col.quirk?.id === "workaholic")  healRate *= 0.75;
@@ -1849,6 +1919,7 @@ ${art.text}`, "success", { key: `artifact-${art.id}` });
           schematics:           surfaceHaulRef.current.schematics.length,
           tradersVisited:       tradersVisitedRef.current,
           artifacts:            artifactsRef.current.length,
+          directivesActive:     activeDirectivesRef.current.length,
           t3Built:              0,
         });
         return next;
@@ -2203,6 +2274,9 @@ ${art.text}`, "success", { key: `artifact-${art.id}` });
       day:                  Math.floor(tickRef.current / 48) + 1,
       morale:               moraleRef.current,
       schematics:           surfaceHaulRef.current.schematics.length,
+      tradersVisited:       tradersVisitedRef.current,
+      artifacts:            artifactsRef.current.length,
+      directivesActive:     activeDirectivesRef.current.length,
       t3Built:              0,
     });
   };
@@ -2271,6 +2345,10 @@ ${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelte
     // Surface condition may block expeditions (e.g. dust storm)
     if (surfaceCondition.effects.expedBlocked) {
       addLog(`⚠ Expeditions blocked — ${surfaceCondition.icon} ${surfaceCondition.label}`);
+      return;
+    }
+    if (directiveFxRef.current.expeditionsBlocked) {
+      addLog(`⚠ Expeditions blocked — LOCKDOWN directive active`);
       return;
     }
     const def = EXPEDITION_TYPES[type];
@@ -2520,6 +2598,7 @@ ${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelte
     setTraderTimer(0); traderTimerRef.current = 0;
     setTradersVisited(0); tradersVisitedRef.current = 0;
     setArtifacts([]); artifactsRef.current = [];
+    setActiveDirectives([]); activeDirectivesRef.current = [];
     activeDilemmaRef.current = null;
     raidCooldownTicksRef.current = Math.round(RAID_GRACE_TICKS * nextDiffConfig.graceMult);
     raidSuppressedThisRaidRef.current = 0;
@@ -2585,6 +2664,21 @@ ${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelte
     setActiveTrader(null); activeTraderRef.current = null;
   };
 
+  // Gated on a built Research Lab, same pattern as the Radio Tower gating
+  // trader arrivals: an existing room earns a second purpose.
+  const handleToggleDirective = (id) => {
+    if (!DIRECTIVES.some(d => d.id === id)) return;
+    if (!grid.flatMap(r => r).some(c => c.type === "researchLab")) return;
+    const isActive = activeDirectives.includes(id);
+    if (!isActive && activeDirectives.length >= MAX_ACTIVE_DIRECTIVES) {
+      addLog(`⚠ Maximum ${MAX_ACTIVE_DIRECTIVES} directives active at once`);
+      return;
+    }
+    setActiveDirectives(prev => isActive ? prev.filter(d => d !== id) : [...prev, id]);
+    addLog(`📋 Directive ${isActive ? "rescinded" : "enacted"}: ${DIRECTIVES.find(d => d.id === id).label}`);
+    playSuccess();
+  };
+
   const handleUnlockTalent = (key) => {
     const t = TALENTS[key];
     // Guard rather than trust the button's disabled state — the dev hook and a
@@ -2611,6 +2705,7 @@ ${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelte
   const armoryArmed   = grid.flatMap(r => r).some(c => c.type === "armory" && c.workers > 0);
   const hasRadioTower = grid.flatMap(r => r).some(c => c.type === "radioTower");
   const radioTowerOnline = hasRadioTower && !surfaceCondition.effects.radioOffline;
+  const hasResearchLab = grid.flatMap(r => r).some(c => c.type === "researchLab");
   const heatState     = getHeatState(heat);
   const heatPct       = (heat / HEAT_MAX) * 100;
   const shelteredCount = colonists.filter(c => c.status === "sheltered").length;
@@ -2678,6 +2773,7 @@ ${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelte
           activeDilemma, milestoneToast, helpOpen, buildMenu, selected,
           activeTrader, tradersVisited, surfaceHaul, artifacts,
           speed, manualPause, resolve, talents, effects,
+          activeDirectives, hasResearchLab,
           pauseCause: pauseReason,
     }),
       // Actions that bypass UI state, so a harness never has to fake clicks.
@@ -2712,6 +2808,7 @@ ${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelte
       // Same caveat as sandboxTopUp: never judge balance from a run that used it.
       sandboxMorale: (floor = 40) => setMorale(prev => Math.max(prev, floor)),
       unlockTalent: handleUnlockTalent,
+      toggleDirective: handleToggleDirective,
       grantResolve: (n = 20) => setResolve(prev => prev + n),
       // Sandbox: skip the RP cost so a test can reach tech-gated content
       // (Radio Tower, and therefore traders) without grinding research.
@@ -2749,6 +2846,7 @@ ${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelte
       sandboxTopUp:  call("sandboxTopUp"),
       sandboxMorale: call("sandboxMorale"),
       unlockTalent:  call("unlockTalent"),
+      toggleDirective: call("toggleDirective"),
       grantResolve:  call("grantResolve"),
       sandboxUnlockTech: call("sandboxUnlockTech"),
       sandboxTrader:     call("sandboxTrader"),
@@ -2777,6 +2875,8 @@ ${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelte
         onRenameColony={setColonyName}
         resolve={resolve}
         onOpenTalents={() => setTalentScreenOpen(true)}
+        activeDirectivesCount={activeDirectives.length}
+        onOpenDirectives={() => setDirectivesScreenOpen(true)}
         timescale={timescale}
         musicVolume={musicVolume}
         res={res}
@@ -2839,6 +2939,15 @@ ${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelte
           talents={talents}
           onUnlock={handleUnlockTalent}
           onClose={() => setTalentScreenOpen(false)}
+        />
+      )}
+
+      {directivesScreenOpen && (
+        <DirectivesScreen
+          directives={DIRECTIVES}
+          active={activeDirectives}
+          onToggle={handleToggleDirective}
+          onClose={() => setDirectivesScreenOpen(false)}
         />
       )}
 

@@ -32,6 +32,7 @@ export default function ColonyHeader({
   onTimescale, onMusicVolume, onRecruit, onToggleJournal, onToggleEffects, onHoverMorale, onBugReport,
   saveLocked, saveLockReason, onSaveNow, onLoadAutosave, onExportSave, onImportSave, onDeleteAutosaves,
   onOpenHelp, resolve = 0, onOpenTalents,
+  activeDirectivesCount = 0, onOpenDirectives,
 }) {
   const moraleColor = morale > 50 ? "#7ed321" : morale > 0 ? "#f5a623" : morale > -50 ? "#ff7744" : "#ff2222";
   const moraleTier  = morale > 75 ? "THRIVING" : morale > 25 ? "STABLE" : morale > 0 ? "UNEASY" : morale > -50 ? "STRAINED" : morale > -75 ? "FRACTURED" : "COLLAPSE";
@@ -210,6 +211,22 @@ export default function ColonyHeader({
                 fontFamily: "monospace",
               }}
             >{"✦"}{resolve > 0 ? ` ${resolve}` : ""}</button>
+            {hasResearchLab && (
+              <button
+                title="Directives - toggle standing colony law"
+                onClick={(e) => { e.stopPropagation(); onOpenDirectives && onOpenDirectives(); }}
+                style={{
+                  background: activeDirectivesCount > 0 ? "#0d1a0d" : "#0a0f1a",
+                  border: `1px solid ${activeDirectivesCount > 0 ? "#7ed32188" : "#1e3a5f"}`,
+                  borderRadius: 3,
+                  color: activeDirectivesCount > 0 ? "#7ed321" : "#3a5a7a",
+                  padding: "2px 7px",
+                  cursor: "pointer",
+                  fontSize: 10,
+                  fontFamily: "monospace",
+                }}
+              >{"📋"}{activeDirectivesCount > 0 ? ` ${activeDirectivesCount}` : ""}</button>
+            )}
             <button
               title="Field Manual / How to Play"
               onClick={(e) => { e.stopPropagation(); onOpenHelp(); }}

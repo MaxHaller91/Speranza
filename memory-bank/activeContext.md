@@ -5,7 +5,7 @@ do not append session logs here. If something here is stale, rewrite it.
 
 Entry point for a fresh session: **`HANDOFF.md`** at the repo root.
 
-## Branch: `opus-5` (branched from `testing`) — current as of 2026-07-31
+## Branch: `opus-5` (branched from `testing`) — current as of 2026-08-01
 
 ### The three rules
 
@@ -69,6 +69,16 @@ raids, spent on 8 permanent talents, and lives in its own `speranza_meta`
 localStorage key so it survives losing a colony and is not carried by run saves.
 
 Pause ownership is **done** — see rule 3b above and `HANDOFF.md` §4c.
+
+Roadmap step 2 (wire unused lore) is **almost done**: 2a Traders, 2b Artifacts,
+and 2c Colony Directives have all landed. Directives (`DIRECTIVES` in
+`speranza-lore.js`) are 7 toggleable standing orders, max 3 active at once,
+gated on a built Research Lab, with mechanics in `directiveEffects()` /
+`DIRECTIVE_MECHANICS` (`gameData.js`) read by the tick loop through
+`directiveFxRef`. Verified numerically in-browser via the dev hook — exact
+matches on overtime's +20% production, rationing's -40% food drain, lockdown's
+heat-gain halving, plus conscription's auto-assign and a save/load round-trip.
+Only **2d, Arc Commanders**, remains unwired.
 
 ## Working patterns
 

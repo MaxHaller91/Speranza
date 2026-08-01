@@ -444,6 +444,121 @@ its em-dashes render correctly in game. Do not "fix" them.
 
 `DIRECTIVES` (2c) and the `COMMANDER_*` sets (2d).
 
+## Colony Directives (step 2c) - 2026-08-01 (opus-5)
+
+Landed as the highest-priority unfinished item this run — the scheduled task
+brief's items 1-4 (difficulty options, talent points, floats-at-source,
+setTimescale consolidation) were all already shipped by a previous session, so
+this picked up the next queued item: `02-wire-unused-lore.md`'s step 2c, the
+last one before Commanders.
+
+7 toggleable standing orders (`DIRECTIVES` in `speranza-lore.js`, unchanged),
+max `MAX_ACTIVE_DIRECTIVES = 3` active at once, gated on a built Research Lab.
+The lore file's own header said "Unlocked via Research Lab L3" - this codebase
+has no room upgrade-level system (`HANDOFF.md` explicitly warns against
+inventing placeholder level fields), so gating is on the room simply existing,
+the same pattern Traders already used for the Radio Tower.
+
+Mechanics live in `DIRECTIVE_MECHANICS` / `directiveEffects()` (`gameData.js`),
+same shape as `talentEffects()`: neutral defaults, multipliers compound, flat
+bonuses add. Every directive modifies a value the tick loop already computes -
+nothing here is a new system:
+
+| directive | hooks into |
+|---|---|
+| Mandatory Overtime | production mult (+20%), morale drain per working colonist |
+| Rationing | food drain mult (-40%), flat morale drain |
+| Conscription | new auto-assign pass (idle -> first open slot), flat morale drain |
+| Lockdown | `calcHeatDelta` heatGainMult (-50%), blocks `handleLaunchExpedition` |
+| Open Comms | flat heat/tick, expedition good-roll mult |
+| Combat Drills | flat scrap/tick, raid injury-window shrink |
+| Triage Protocol | production mult (-10%), heal rate mult (+50%) |
+
+Combat Drills' "-15% injury chance" is implemented as a threshold shift, not a
+literal reroll: the raid strike roll has three zones (flee/hold, injury, kill).
+The directive shrinks the injury zone from the flee side only -
+`fleeThreshold = injureThreshold - (injureThreshold - 0.50) * injuryChanceMult`
+- so the kill-zone width (and therefore death odds) is untouched; only the
+"held their post" vs. "injured" split moves. Composes correctly with the
+HARDENED trait's existing `injureThreshold` shrink since both feed the same
+formula.
+
+Skipped Triage Protocol's third clause, "Worn Out risk reduced" - there is no
+Worn Out mechanic in the codebase. `injuryCount` is tracked and displayed
+(`SidePanel.jsx`) but nothing reads it as a death trigger; the `wornOut`
+epitaph pool in `speranza-lore.js` is equally dormant. Not invented one to fill
+the gap - out of scope for this step, and inventing a death mechanic to serve
+one directive's flavor text is exactly the kind of scope creep the project
+rules warn against.
+
+Found and fixed in passing, in code this step already had open: a
+copy-paste bug in the tick loop's raid-end milestone snapshot had
+`tradersVisited` and `artifacts` each listed three times (harmless - JS object
+literals keep the last value - but worth a clean edit while touching that
+exact block to add `directivesActive`). Also backfilled `tradersVisited` /
+`artifacts` / `directivesActive` into `handleSurfaceRaidWon`'s milestone
+snapshot, which was missing them entirely (so `firstTrader`/`firstArtifact`/
+`firstDirective` could never fire off a raid won on the surface, only off an
+underground raid or a plain tick).
+
+### Verification
+
+All done through the dev hook (`window.__speranza`) against a running dev
+server, with `await`-spaced calls after learning the hard way (see gotcha
+below) that un-spaced calls race. Numeric checks, not visual ones, per
+`HANDOFF.md` §6:
+
+- **Overtime**: baseline workshop output +2.0 scrap/tick (1 worker, no
+  adjacency bonus on this layout), +2.4/tick with Overtime active. Exactly
+  2.0 x 1.20.
+- **Rationing**: baseline food drain -1.2/tick (3 colonists x 0.4), -0.72/tick
+  with Rationing active. Exactly -1.2 x 0.60.
+- **Lockdown**: baseline heat +1.7/tick (gross 2.0 x mult 1, minus the flat
+  0.3 decay), +0.7/tick with Lockdown active. Exactly 2.0 x 0.50 - 0.3 - the
+  flat decay term is why the ratio isn't a clean 0.5, same shape as the
+  existing Deep Silence talent math.
+- **Lockdown** also confirmed to block `launch()` with the correct log line,
+  cost nothing, and add zero expeditions.
+- **Conscription**: the one idle colonist (OKAFOR) was auto-assigned to the
+  under-capacity Workshop within one tick of enabling the directive; the other
+  two colonists' assignments were untouched.
+- **Max-3 cap**: enforced correctly through the UI (one click = one render,
+  matches every other handler's convention). **Not** atomic against multiple
+  hook calls fired without awaiting a render between them - see gotcha below.
+- **Save/load**: enacted Triage Protocol, saved, toggled off in memory,
+  loaded the autosave, directive was back. `activeDirectives` round-trips
+  through `buildSaveState`/`applyLoadedState` correctly.
+- **Milestone**: `firstDirective` fired into `firedMilestones` on the first
+  directive enacted.
+- `npm run build`: 391.78 kB vs. 384.18 kB on the same commit without this
+  change (`git stash` A/B) - a real ~7.6 kB feature addition (mechanics +
+  a full toggle panel), not accidental dev-code leakage. StrictMode audit
+  script reports 0.
+
+Not live-fire tested: Open Comms' heat/expedition-roll hooks and Combat
+Drills' injury-threshold shift, both of which need an actual raid to observe
+end-to-end. Code-reviewed instead - both follow the exact same
+`directiveFxRef.current.X` pattern as the four hooks verified numerically
+above, composed the same way condition/talent multipliers already are at
+those call sites.
+
+### Dev-hook gotcha found while testing
+
+`handleToggleDirective` (and the pre-existing `handleUnlockTalent` it mirrors)
+reads `activeDirectives` from component state to decide `isActive` and the
+max-3 guard, not from the state updater's `prev`. Firing three
+`toggleDirective()` calls back-to-back with no `await` between them - the
+first thing tried - momentarily pushed the list to 4 entries, because all
+three calls read the same pre-render snapshot. A real player can never hit
+this: one click is one render, and the next click can't fire until the DOM
+has re-rendered. Not fixed, because it would diverge from the established
+convention every other handler in this file already uses (`handleAssign`,
+`handleLaunchExpedition`, `handleTraderAccept` all read component state the
+same way) - fixing it here alone would be inconsistent without fixing all of
+them. **Whoever scripts the next soak-test harness: space dev-hook action
+calls with an `await` on a render tick, the same caution already written down
+for `sandboxTopUp`/`sandboxMorale`.**
+
 ## Known Issues / Limitations ⚠️
 
 ### Save System Validation Pending

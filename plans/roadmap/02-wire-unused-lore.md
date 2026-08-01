@@ -30,7 +30,10 @@ Expect more of the same.
 Do these one at a time, verifying each in the browser before the next. Do **not**
 build all four in parallel.
 
-### 2a. Traders
+**Status: 2a, 2b, 2c done. 2d (Commanders) is the only one left.** See
+`memory-bank/progress.md` for the writeup of each.
+
+### 2a. Traders — DONE
 
 Cheapest and most immediately fun. A trader arrives periodically, offers a
 bounded swap, and leaves.
@@ -45,7 +48,7 @@ bounded swap, and leaves.
 - Feeds the existing `tradersVisited` milestone trigger.
 - Gate on the Radio Tower being built, so the building earns a second purpose.
 
-### 2b. Artifacts
+### 2b. Artifacts — DONE
 
 `ARTIFACT_TEMPLATES` / `ARTIFACT_ITEMS` are a natural expedition reward and slot
 into the loot pipeline that already exists.
@@ -58,13 +61,24 @@ into the loot pipeline that already exists.
   collection view.
 - Feeds the existing `artifacts` milestone trigger.
 
-### 2c. Directives
+### 2c. Directives — DONE
 
 Colony-wide standing orders the player sets, with a tradeoff.
 
 - New state `activeDirectives: string[]` + ref mirror.
 - Apply effects in the tick loop where the relevant number is computed.
 - Feeds `directivesActive`.
+
+Shipped as designed, with one deliberate deviation: the lore file's header
+comment said "Unlocked via Research Lab L3", but this codebase has no room
+upgrade-level system (`HANDOFF.md`/`progress.md` explicitly warn against
+inventing placeholder level fields for exactly this reason). Gated on a
+**built** Research Lab instead — the same pattern Traders already used for the
+Radio Tower, an existing room earning a second purpose. `MAX_ACTIVE_DIRECTIVES
+= 3` per the file's own comment. Also skipped triageProtocol's "Worn Out risk
+reduced" clause — there is no Worn Out mechanic in the codebase to reduce
+(`injuryCount` is tracked and displayed but nothing reads it as a death
+trigger); its other two effects (production, heal rate) shipped as described.
 
 ### 2d. Commanders
 
