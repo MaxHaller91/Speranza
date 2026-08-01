@@ -385,6 +385,65 @@ snapshot - their absence made an early check report a false negative.
 `DIRECTIVES`, `ARTIFACT_TEMPLATES` / `ARTIFACT_ITEMS`, and the `COMMANDER_*`
 sets remain imported-but-unused - steps 2b, 2c, 2d.
 
+## Artifacts (step 2b) + a level-up bug it exposed - 2026-07-31 (opus-5)
+
+### The bug, which was already shipping
+
+**Level-up announcements silently vanished whenever anything else had already
+updated colonists in the same tick.** The tick loop collected a `levelUps` array
+from *inside* the `setColonists` updater and then read it on the very next line.
+That only works when React runs the updater eagerly, which it does as a bailout
+optimisation *only when no update is already queued*. Any tick with a prior
+colonist update swallowed every "reached Level N" message, so the trait picker
+would open with no explanation of why.
+
+Caught because artifacts (below) hang off the same array and never fired. Three
+colonists reached level 5 with `pendingTraitPick: true` and the log was empty.
+
+Fixed by following MASTER_ROADMAP rule 2 properly: the per-tick advancement is
+now a named pure function `advance(col)`, applied once to `colonistsRef.current`
+to decide what to announce and once inside the updater to produce the new state.
+Deterministic, so computing it twice is safe. Verified: 3 level-ups logged, 3
+artifacts created.
+
+Note the impure-updater audit script does **not** catch this shape - the array
+push is not one of the flagged calls. Worth remembering that a clean audit is
+necessary, not sufficient.
+
+### Artifacts
+
+`ARTIFACT_TEMPLATES` / `ARTIFACT_ITEMS` were authored, imported by nothing, and
+had a dormant `artifacts` milestone waiting.
+
+The roadmap doc guessed these should be expedition loot. The lore file's own
+header says otherwise - *"Level 5 colonist creates a named artifact from these"* -
+and that is the better design, so it is what shipped: an artifact is tied to a
+specific person you kept alive long enough to make it. One is created every 5
+levels (`ARTIFACT_EVERY_N_LEVELS`).
+
+- `makeArtifact()` in `gameData.js` is pure with an injectable rng, so the
+  `[NAME]` / `[ITEM]` substitution is testable without running a colony for an
+  hour. Verified deterministically and across random samples: no placeholders
+  survive.
+- Displayed in a new ARTIFACTS panel in `SidePanel`, above the memorial - the
+  living counterpart to it. Artifacts are deliberately **kept when their maker
+  dies**.
+- Full state discipline: ref mirror, save, load, restart reset.
+
+Added `sandboxGrantXp()` to the dev hook; level 5 is ~1000 duty ticks, which
+made all level-gated content (traits as well as artifacts) untestable in
+practice.
+
+### Also checked
+
+The `?` characters visible when grepping `speranza-lore.js` are a terminal
+encoding artifact, **not** file corruption - the file has zero U+FFFD bytes and
+its em-dashes render correctly in game. Do not "fix" them.
+
+### Still unwired
+
+`DIRECTIVES` (2c) and the `COMMANDER_*` sets (2d).
+
 ## Known Issues / Limitations ⚠️
 
 ### Save System Validation Pending

@@ -51,7 +51,7 @@ export default function SidePanel({
   selCell, buildMenu, selected,
   armoryArmed, expeditions, expedDuration, unassigned,
   expedLocationId, expedCrewIds,
-  unlockedTechs, res, memorial,
+  unlockedTechs, res, memorial, artifacts = [],
   // callbacks
   onCloseColonist, onAssign, onSetExpedDuration, onLaunchExpedition,
   onSetExpedLocation, onToggleCrew,
@@ -445,6 +445,26 @@ export default function SidePanel({
               <button onClick={() => onRepair(selected.r, selected.c)} style={{ flex: 1, background: "#001a0a", border: "1px solid #20a040", borderRadius: 4, color: "#4ca060", padding: 4, cursor: "pointer", fontSize: 9 }}>🔧 REPAIR (20 scrap)</button>
             )}
             <button onClick={() => onDemolish(selected.r, selected.c)} style={{ flex: 1, background: "#1a0000", border: "1px solid #5a2020", borderRadius: 4, color: "#844", padding: 4, cursor: "pointer", fontSize: 9 }}>DEMOLISH</button>
+          </div>
+        </div>
+      )}
+
+      {/* Artifacts — things long-lived colonists made. The living counterpart
+          to the memorial, and deliberately kept after their maker dies. */}
+      {!selected && artifacts.length > 0 && (
+        <div style={{ background: "#0b0a06", border: "1px solid #2a2410", borderRadius: 8, padding: 10, marginBottom: 8 }}>
+          <div style={{ color: "#8a7a4a", fontSize: 9, letterSpacing: 2, marginBottom: 8, borderBottom: "1px solid #2a2410", paddingBottom: 6 }}>
+            ✧ ARTIFACTS · {artifacts.length}
+          </div>
+          <div style={{ maxHeight: 170, overflowY: "auto" }}>
+            {artifacts.slice().reverse().map((a, i) => (
+              <div key={a.id ?? i} style={{ marginBottom: 9, paddingBottom: 7, borderBottom: i < artifacts.length - 1 ? "1px solid #1c1a10" : "none" }}>
+                <div style={{ color: "#c8b070", fontSize: 8, letterSpacing: 0.5, marginBottom: 3 }}>
+                  {a.colonist} · DAY {a.day}
+                </div>
+                <div style={{ color: "#6a6250", fontSize: 7, fontStyle: "italic", lineHeight: 1.5 }}>{a.text}</div>
+              </div>
+            ))}
           </div>
         </div>
       )}

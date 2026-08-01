@@ -32,6 +32,7 @@ import {
   DIFFICULTIES, DIFFICULTY_ORDER, DEFAULT_DIFFICULTY,
   roundRes,
   TRADER_CHECK_EVERY, TRADER_CHANCE, TRADER_STAY_TICKS, traderOffersFor, canAffordOffer,
+  ARTIFACT_EVERY_N_LEVELS, makeArtifact,
   TALENTS, TALENT_ORDER, talentEffects, resolveEarned,
   T2_TECHS, TRAITS, TRAIT_KEYS,
   makeColonist, ROOM_TYPES, EXCAVATION_DEFS,
@@ -155,6 +156,8 @@ export default function Speranza() {
   const [activeTrader,          setActiveTrader]          = useState(null);
   const [traderTimer,           setTraderTimer]           = useState(0);
   const [tradersVisited,        setTradersVisited]        = useState(0);
+  // Objects made by long-lived colonists. Kept when they die — that is the point.
+  const [artifacts,             setArtifacts]             = useState([]);
   const [firedDilemmas,         setFiredDilemmas]         = useState([]);
   // Help / quickstart modal
   const HELP_SEEN_KEY = "speranza_help_seen";
@@ -243,6 +246,7 @@ export default function Speranza() {
   const activeTraderRef          = useRef(null);
   const traderTimerRef           = useRef(0);
   const tradersVisitedRef        = useRef(0);
+  const artifactsRef             = useRef([]);
   const activeDilemmaRef         = useRef(null);
   const tickHistoryRef = useRef([]);
   const eventTraceRef = useRef([]);
@@ -324,6 +328,7 @@ export default function Speranza() {
   useEffect(() => { activeTraderRef.current     = activeTrader;     }, [activeTrader]);
   useEffect(() => { traderTimerRef.current      = traderTimer;      }, [traderTimer]);
   useEffect(() => { tradersVisitedRef.current   = tradersVisited;   }, [tradersVisited]);
+  useEffect(() => { artifactsRef.current        = artifacts;        }, [artifacts]);
   useEffect(() => { heatSuppressedTicksRef.current = heatSuppressedTicks; }, [heatSuppressedTicks]);
   // Raid cooldown — starts at 48 (one in-game day) to block raids on fresh game
   const raidCooldownTicksRef = useRef(RAID_GRACE_TICKS);
@@ -451,6 +456,7 @@ export default function Speranza() {
       dilemmaTimer,
       traderTimer,
       tradersVisited,
+      artifacts,
       activeDilemma,
     };
 
@@ -486,6 +492,7 @@ export default function Speranza() {
       dilemmaTimer: s.dilemmaTimer,
       traderTimer: s.traderTimer,
       tradersVisited: s.tradersVisited,
+      artifacts: s.artifacts,
       activeTrader: null,  // a visitor does not survive a reload
       activeDilemma: s.activeDilemma,
       activeRaid: null,
@@ -502,7 +509,7 @@ export default function Speranza() {
     surfaceCondition, surfaceConditionTimer, peakPopulation,
     firedMilestones, firedDilemmas, recentDilemmaOutcomes,
     historyLog, heatSuppressedTicks, deprivedTicks, dilemmaTimer, activeDilemma,
-    traderTimer, tradersVisited,
+    traderTimer, tradersVisited, artifacts,
   ]);
 
   const buildSavePayload = useCallback((source = null) => ({
@@ -848,6 +855,8 @@ export default function Speranza() {
       setDilemmaTimer(state.dilemmaTimer ?? 0);
       setTraderTimer(state.traderTimer ?? 0);
       setTradersVisited(state.tradersVisited ?? 0);
+      setArtifacts(Array.isArray(state.artifacts) ? state.artifacts : []);
+      artifactsRef.current = Array.isArray(state.artifacts) ? state.artifacts : [];
       setActiveTrader(null); activeTraderRef.current = null;
       setActiveDilemma(state.activeDilemma ?? null);
 
@@ -1569,7 +1578,10 @@ export default function Speranza() {
             morale:               moraleRef.current,
             schematics:           surfaceHaulRef.current.schematics.length,
           tradersVisited:       tradersVisitedRef.current,
+          artifacts:            artifactsRef.current.length,
             tradersVisited:       tradersVisitedRef.current,
+          artifacts:            artifactsRef.current.length,
+            artifacts:            artifactsRef.current.length,
             t3Built:              0,
           });
         } else {
@@ -1705,33 +1717,60 @@ export default function Speranza() {
       // Level up every 20 XP → pendingTraitPick flag set.
       // Announce level-ups outside the updater — logging from inside meant every
       // promotion was written to the log twice under StrictMode.
-      const levelUps = [];
-      setColonists(prev => prev.map(col => {
+      // The advancement is a deterministic function of the colonist, so it is
+      // computed twice on purpose: once from the ref to decide what to announce,
+      // and once inside the updater to produce the new state.
+      //
+      // It used to collect `levelUps` from INSIDE the updater and read the array
+      // on the next line. That only works when React happens to run the updater
+      // eagerly, which it skips whenever an update is already queued — so any
+      // tick where something else had already touched colonists silently
+      // swallowed every "reached Level N" announcement, and with it the trait
+      // prompt's explanation. Decide first, then update. (MASTER_ROADMAP rule 2.)
+      const advance = (col) => {
         const onDuty   = col.status === "working" || col.status === "onSentry";
-        const newAlive = (col.ticksAlive ?? 0) + 1;
         // insomniac: dutyTicks always increments regardless of status
-        const newDuty  = (col.dutyTicks  ?? 0) + (onDuty || col.quirk?.id === "insomniac" ? 1 : 0);
+        const newDuty  = (col.dutyTicks ?? 0) + (onDuty || col.quirk?.id === "insomniac" ? 1 : 0);
         // workaholic: gains XP every 8 ticks instead of 10
         const xpInterval = col.quirk?.id === "workaholic" ? 8 : 10;
         const newXp    = (col.xp ?? 0) + (onDuty && newDuty % xpInterval === 0 ? 1 : 0);
         const newLevel = Math.floor(newXp / 20);
-        const leveled  = newLevel > (col.level ?? 0);
-        if (leveled && !levelUps.some(l => l.name === col.name && l.level === newLevel)) {
-          levelUps.push({ name: col.name, level: newLevel });
-        }
         return {
           ...col,
-          ticksAlive:       newAlive,
+          ticksAlive:       (col.ticksAlive ?? 0) + 1,
           dutyTicks:        newDuty,
           xp:               newXp,
           level:            newLevel,
-          pendingTraitPick: leveled ? true : col.pendingTraitPick,
+          pendingTraitPick: newLevel > (col.level ?? 0) ? true : col.pendingTraitPick,
         };
-      }));
+      };
+
+      const levelUps = [];
+      colonistsRef.current.forEach(col => {
+        const next = advance(col);
+        if (next.level > (col.level ?? 0)) levelUps.push({ name: col.name, level: next.level });
+      });
+      setColonists(prev => prev.map(advance));
       levelUps.forEach(({ name, level }) => {
         pushEventTrace("colonist_level_up", name, `${level}`);
         addLog(`⭐ ${name} reached Level ${level}! Trait selection available.`);
         changeMoraleRef.current(5, "morale boost from achievement");
+
+        // Every fifth level, that colonist makes something. Deliberately out
+        // here rather than in the updater above: it rolls random text.
+        if (level > 0 && level % ARTIFACT_EVERY_N_LEVELS === 0) {
+          const art = makeArtifact({
+            colonistName: name,
+            day: Math.floor(tickRef.current / 48) + 1,
+            templates: ARTIFACT_TEMPLATES,
+            items: ARTIFACT_ITEMS,
+          });
+          setArtifacts(prev => { const n = [...prev, art]; artifactsRef.current = n; return n; });
+          addLog(`✧ ${art.text}`);
+          addToast(`✧ ARTIFACT
+${art.text}`, "success", { key: `artifact-${art.id}` });
+          addHistoryRef.current("✧", `${name} made a ${art.item}`);
+        }
       });
 
       // 6. Excavation progress ──────────────────────────────────────────────
@@ -1809,6 +1848,7 @@ export default function Speranza() {
           morale:               moraleRef.current,
           schematics:           surfaceHaulRef.current.schematics.length,
           tradersVisited:       tradersVisitedRef.current,
+          artifacts:            artifactsRef.current.length,
           t3Built:              0,
         });
         return next;
@@ -2479,6 +2519,7 @@ ${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelte
     setActiveTrader(null); activeTraderRef.current = null;
     setTraderTimer(0); traderTimerRef.current = 0;
     setTradersVisited(0); tradersVisitedRef.current = 0;
+    setArtifacts([]); artifactsRef.current = [];
     activeDilemmaRef.current = null;
     raidCooldownTicksRef.current = Math.round(RAID_GRACE_TICKS * nextDiffConfig.graceMult);
     raidSuppressedThisRaidRef.current = 0;
@@ -2635,7 +2676,7 @@ ${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelte
           // This is the SAME value the game runs on, not a second copy of the
           // rules — the two used to be able to drift apart.
           activeDilemma, milestoneToast, helpOpen, buildMenu, selected,
-          activeTrader, tradersVisited, surfaceHaul,
+          activeTrader, tradersVisited, surfaceHaul, artifacts,
           speed, manualPause, resolve, talents, effects,
           pauseCause: pauseReason,
     }),
@@ -2677,6 +2718,10 @@ ${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelte
       sandboxUnlockTech: (key) => { if (T2_TECHS[key]) setUnlockedTechs(prev => prev.includes(key) ? prev : [...prev, key]); },
       // Summon a trader on demand. Arrival is a 45% roll every 60 ticks, so
       // waiting on RNG made trade behaviour tedious to test.
+      // Reaching level 5 legitimately takes ~1000 duty ticks, which makes
+      // level-gated content (traits, artifacts) untestable in practice.
+      sandboxGrantXp: (amount = 100) =>
+        setColonists(prev => prev.map(c => ({ ...c, xp: (c.xp ?? 0) + amount }))),
       sandboxTrader: (specialty) => {
         const t = specialty
           ? (TRADERS.find(x => x.specialty === specialty) ?? TRADERS[0])
@@ -2707,6 +2752,7 @@ ${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelte
       grantResolve:  call("grantResolve"),
       sandboxUnlockTech: call("sandboxUnlockTech"),
       sandboxTrader:     call("sandboxTrader"),
+      sandboxGrantXp:    call("sandboxGrantXp"),
     };
   }, []);
 
@@ -2912,6 +2958,7 @@ ${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelte
           unlockedTechs={unlockedTechs}
           res={res}
           memorial={memorial}
+          artifacts={artifacts}
           onCloseColonist={() => setSelectedColonist(null)}
           onAssign={handleAssign}
           onSetExpedDuration={setExpedDuration}

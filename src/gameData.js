@@ -117,6 +117,32 @@ export const DIFFICULTIES = {
 export const DIFFICULTY_ORDER = ["settler", "survivor", "condemned"];
 export const DEFAULT_DIFFICULTY = "survivor";
 
+// ─── Artifacts ───────────────────────────────────────────────────────────────
+// `ARTIFACT_TEMPLATES` / `ARTIFACT_ITEMS` were authored and imported by nothing,
+// with a dormant `artifacts` milestone trigger waiting on them.
+//
+// The lore file's own header says "Level 5 colonist creates a named artifact
+// from these", so that is the trigger used here rather than expedition loot:
+// it ties each object to a specific person you kept alive long enough to make
+// it, which is the point. A colonist reaching level 5 has survived a long time.
+export const ARTIFACT_EVERY_N_LEVELS = 5;
+
+/**
+ * Build one artifact record. Pure apart from the injected rng, so the text
+ * generation can be tested without running a colony for an hour.
+ */
+export function makeArtifact({ colonistName, day, templates, items, rng = Math.random }) {
+  const template = templates[Math.floor(rng() * templates.length)];
+  const item     = items[Math.floor(rng() * items.length)];
+  return {
+    id: `art-${day}-${colonistName}-${Math.floor(rng() * 1e6)}`,
+    colonist: colonistName,
+    day,
+    item,
+    text: template.replaceAll("[NAME]", colonistName).replaceAll("[ITEM]", item),
+  };
+}
+
 // ─── Traders ─────────────────────────────────────────────────────────────────
 // `TRADERS` in speranza-lore.js was fully authored and imported by nothing —
 // eight named characters with a specialty each, and a dormant `tradersVisited`
