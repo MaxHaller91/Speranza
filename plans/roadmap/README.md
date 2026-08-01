@@ -44,6 +44,21 @@ first** — it contains two invariants that, if broken, silently corrupt the gam
       (`gameData.js`). See `memory-bank/progress.md` "Colony Directives" for the
       in-browser numeric verification.
 
+## Claiming work (read this before starting anything)
+
+Two agents share this queue: an interactive session and a scheduled run that
+fires every 5 hours. They have already picked the same step at the same time
+once.
+
+**Before starting a step, claim it**: add `— CLAIMED <agent> <date>` to its line
+below, commit that single change, and push. If a step is already claimed and the
+claim is under 24h old, pick the next unclaimed one instead. Release a claim by
+ticking the item off when you land it, or by removing the marker if you abandon
+it.
+
+A claim is one commit touching one line. It costs seconds and it prevents two
+agents writing the same file.
+
 ### Next
 
 Step 2 is one sub-step from done: **2d, Arc Commanders**, is the last unwired
