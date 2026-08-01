@@ -1,3 +1,4 @@
+import { fs } from "../gameData.js";
 // HelpModal.jsx — first-run quickstart guide / field manual
 // Opens automatically on first play (localStorage key: speranza_help_seen)
 // Reopenable via the ? button in ColonyHeader.
@@ -71,7 +72,7 @@ export default function HelpModal({ isOpen, page, onNext, onPrev, onClose }) {
 
   const btnBase = {
     fontFamily: "monospace",
-    fontSize: 10,
+    fontSize: fs(10),
     letterSpacing: 1,
     padding: "4px 10px",
     background: "#0a0c14",
@@ -103,12 +104,12 @@ export default function HelpModal({ isOpen, page, onNext, onPrev, onClose }) {
 
         {/* Page icon + title */}
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 4 }}>
-          <span style={{ fontSize: 26 }}>{current.icon}</span>
+          <span style={{ fontSize: fs(26) }}>{current.icon}</span>
           <div>
-            <div style={{ color: "#f5a623", fontSize: 13, letterSpacing: 2, fontWeight: "bold" }}>
+            <div style={{ color: "#f5a623", fontSize: fs(13), letterSpacing: 2, fontWeight: "bold" }}>
               {current.title}
             </div>
-            <div style={{ color: "#2a4a6a", fontSize: 8, letterSpacing: 2, marginTop: 2 }}>
+            <div style={{ color: "#2a4a6a", fontSize: fs(8), letterSpacing: 2, marginTop: 2 }}>
               FIELD MANUAL · PAGE {page + 1} / {TOTAL} · {current.subtitle.toUpperCase()}
             </div>
           </div>
@@ -122,7 +123,7 @@ export default function HelpModal({ isOpen, page, onNext, onPrev, onClose }) {
           {current.bullets.map((b, i) => (
             <li key={i} style={{
               color: "#7a9ab4",
-              fontSize: 11,
+              fontSize: fs(11),
               lineHeight: 1.85,
               marginBottom: 10,
               paddingLeft: 10,
@@ -174,7 +175,7 @@ export default function HelpModal({ isOpen, page, onNext, onPrev, onClose }) {
           <button onClick={onClose} style={{
             ...btnBase,
             color: "#3c4d63",
-            fontSize: 9,
+            fontSize: fs(9),
             marginLeft: 6,
           }}>✕ CLOSE</button>
         </div>

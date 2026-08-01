@@ -1,7 +1,7 @@
 // GameOverModal.jsx — game over / colony collapse screen
 // Props: gameOver, historyLog, onRestart
 import { useState } from "react";
-import { DIFFICULTIES, DIFFICULTY_ORDER, DEFAULT_DIFFICULTY } from "../gameData.js";
+import { DIFFICULTIES, DIFFICULTY_ORDER, DEFAULT_DIFFICULTY, fs,} from "../gameData.js";
 
 export default function GameOverModal({ colonyName, gameOver, historyLog, onRestart }) {
   const [nextDifficulty, setNextDifficulty] = useState(DEFAULT_DIFFICULTY);
@@ -29,17 +29,17 @@ export default function GameOverModal({ colonyName, gameOver, historyLog, onRest
       }}>
         {/* Grade */}
         <div style={{ textAlign: "center", marginBottom: 20 }}>
-          <div style={{ fontSize: 36, marginBottom: 6 }}>💀</div>
-          <div style={{ fontSize: 28, fontWeight: "bold", color: gradeColor, letterSpacing: 4, marginBottom: 4 }}>
+          <div style={{ fontSize: fs(36), marginBottom: 6 }}>💀</div>
+          <div style={{ fontSize: fs(28), fontWeight: "bold", color: gradeColor, letterSpacing: 4, marginBottom: 4 }}>
             {grade}
           </div>
-          <div style={{ fontSize: 10, color: "#445566", letterSpacing: 2 }}>COLONY DESIGNATION: {colonyName ?? "SPERANZA"}</div>
-          <div style={{ fontSize: 9, color: "#5a4a2a", letterSpacing: 2, marginTop: 2 }}>DIFFICULTY: {playedDifficulty.label}</div>
+          <div style={{ fontSize: fs(10), color: "#445566", letterSpacing: 2 }}>COLONY DESIGNATION: {colonyName ?? "SPERANZA"}</div>
+          <div style={{ fontSize: fs(9), color: "#5a4a2a", letterSpacing: 2, marginTop: 2 }}>DIFFICULTY: {playedDifficulty.label}</div>
         </div>
 
         {/* Reason */}
         <div style={{ background: "#1a0808", border: "1px solid #ff333344", borderRadius: 6, padding: "10px 14px", marginBottom: 16, textAlign: "center" }}>
-          <div style={{ color: "#ff6666", fontSize: 11, letterSpacing: 1 }}>{gameOver.reason}</div>
+          <div style={{ color: "#ff6666", fontSize: fs(11), letterSpacing: 1 }}>{gameOver.reason}</div>
         </div>
 
         {/* Stats grid */}
@@ -51,8 +51,8 @@ export default function GameOverModal({ colonyName, gameOver, historyLog, onRest
             ["PEAK POPULATION", gameOver.peakPop ?? 0],
           ].map(([label, val]) => (
             <div key={label} style={{ background: "#0a0c18", border: "1px solid #1a2535", borderRadius: 6, padding: "8px 12px" }}>
-              <div style={{ color: "#2a4a6a", fontSize: 8, letterSpacing: 1, marginBottom: 3 }}>{label}</div>
-              <div style={{ color: "#c8d8e8", fontSize: 20, fontWeight: "bold" }}>{val}</div>
+              <div style={{ color: "#2a4a6a", fontSize: fs(8), letterSpacing: 1, marginBottom: 3 }}>{label}</div>
+              <div style={{ color: "#c8d8e8", fontSize: fs(20), fontWeight: "bold" }}>{val}</div>
             </div>
           ))}
         </div>
@@ -60,12 +60,12 @@ export default function GameOverModal({ colonyName, gameOver, historyLog, onRest
         {/* Casualties */}
         {(gameOver.casualties?.length > 0) && (
           <div style={{ marginBottom: 16 }}>
-            <div style={{ color: "#7a6a4a", fontSize: 9, letterSpacing: 2, marginBottom: 6, borderBottom: "1px solid #2a1a0a", paddingBottom: 4 }}>
+            <div style={{ color: "#7a6a4a", fontSize: fs(9), letterSpacing: 2, marginBottom: 6, borderBottom: "1px solid #2a1a0a", paddingBottom: 4 }}>
               🕯 FALLEN COLONISTS
             </div>
             <div style={{ maxHeight: 120, overflowY: "auto" }}>
               {gameOver.casualties.map((entry, i) => (
-                <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", borderBottom: "1px solid #0d1020", fontSize: 9 }}>
+                <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", borderBottom: "1px solid #0d1020", fontSize: fs(9) }}>
                   <span style={{ color: "#c8d0d8" }}>{entry.name} <span style={{ color: "#555" }}>LVL {entry.level}</span></span>
                   <span style={{ color: "#8a5a3a" }}>
                     {entry.cause === "raidKilled"        ? "killed in raid"
@@ -84,14 +84,14 @@ export default function GameOverModal({ colonyName, gameOver, historyLog, onRest
         {/* Colony history timeline */}
         {historyLog.length > 0 && (
           <div style={{ marginBottom: 16 }}>
-            <div style={{ color: "#7a6a4a", fontSize: 9, letterSpacing: 2, marginBottom: 6, borderBottom: "1px solid #2a1a0a", paddingBottom: 4 }}>
+            <div style={{ color: "#7a6a4a", fontSize: fs(9), letterSpacing: 2, marginBottom: 6, borderBottom: "1px solid #2a1a0a", paddingBottom: 4 }}>
               📜 COLONY TIMELINE
             </div>
             <div style={{ maxHeight: 140, overflowY: "auto" }}>
               {historyLog.map((ev, i) => (
-                <div key={i} style={{ display: "flex", gap: 8, padding: "3px 0", borderBottom: "1px solid #0d1020", fontSize: 9 }}>
+                <div key={i} style={{ display: "flex", gap: 8, padding: "3px 0", borderBottom: "1px solid #0d1020", fontSize: fs(9) }}>
                   <span style={{ color: "#445566", minWidth: 42, flexShrink: 0 }}>Day {ev.day}</span>
-                  <span style={{ fontSize: 10 }}>{ev.icon}</span>
+                  <span style={{ fontSize: fs(10) }}>{ev.icon}</span>
                   <span style={{ color: "#8899aa" }}>{ev.text}</span>
                 </div>
               ))}
@@ -101,16 +101,16 @@ export default function GameOverModal({ colonyName, gameOver, historyLog, onRest
 
         {/* Run code */}
         <div style={{ textAlign: "center", marginBottom: 20 }}>
-          <div style={{ color: "#2a4a6a", fontSize: 8, letterSpacing: 2, marginBottom: 4 }}>RUN CODE</div>
+          <div style={{ color: "#2a4a6a", fontSize: fs(8), letterSpacing: 2, marginBottom: 4 }}>RUN CODE</div>
           <div style={{ background: "#0a0c14", border: "1px solid #1a3040", borderRadius: 4, padding: "6px 14px", display: "inline-block" }}>
-            <span style={{ color: "#4ab3f4", fontSize: 12, fontFamily: "monospace", letterSpacing: 2 }}>{runCode}</span>
-            <button onClick={() => navigator.clipboard?.writeText(runCode)} style={{ marginLeft: 10, background: "none", border: "none", cursor: "pointer", color: "#2a5a7a", fontSize: 9 }}>COPY</button>
+            <span style={{ color: "#4ab3f4", fontSize: fs(12), fontFamily: "monospace", letterSpacing: 2 }}>{runCode}</span>
+            <button onClick={() => navigator.clipboard?.writeText(runCode)} style={{ marginLeft: 10, background: "none", border: "none", cursor: "pointer", color: "#2a5a7a", fontSize: fs(9) }}>COPY</button>
           </div>
         </div>
 
         {/* New colony difficulty pick — the levers only apply going forward. */}
         <div style={{ marginBottom: 12 }}>
-          <div style={{ color: "#2a4a6a", fontSize: 8, letterSpacing: 2, marginBottom: 6, textAlign: "center" }}>
+          <div style={{ color: "#2a4a6a", fontSize: fs(8), letterSpacing: 2, marginBottom: 6, textAlign: "center" }}>
             NEXT COLONY DIFFICULTY
           </div>
           <div style={{ display: "flex", gap: 6 }}>
@@ -119,7 +119,7 @@ export default function GameOverModal({ colonyName, gameOver, historyLog, onRest
                 key={key}
                 onClick={() => setNextDifficulty(key)}
                 style={{
-                  flex: 1, padding: "8px 4px", cursor: "pointer", fontSize: 9,
+                  flex: 1, padding: "8px 4px", cursor: "pointer", fontSize: fs(9),
                   letterSpacing: 1, fontFamily: "monospace",
                   background: nextDifficulty === key ? "#1a2a3a" : "#0a0c14",
                   border: `1px solid ${nextDifficulty === key ? "#4ab3f4" : "#1a2535"}`,
@@ -135,7 +135,7 @@ export default function GameOverModal({ colonyName, gameOver, historyLog, onRest
         <button onClick={() => onRestart(nextDifficulty)} style={{
           width: "100%", background: "#1a0000", border: "2px solid #ff3333",
           borderRadius: 6, color: "#ff6666", padding: "12px", cursor: "pointer",
-          fontSize: 12, letterSpacing: 3, fontFamily: "monospace",
+          fontSize: fs(12), letterSpacing: 3, fontFamily: "monospace",
         }}>NEW COLONY</button>
       </div>
     </div>

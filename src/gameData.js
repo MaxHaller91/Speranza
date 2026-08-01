@@ -899,6 +899,27 @@ export function deprivationStage(deprivedTicks, collapseTicksBonus = 0) {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── UI scale ────────────────────────────────────────────────────────────────
+// Body text was 7-9px throughout, which is the single most obvious "hobby
+// project" tell on a store page and genuinely hard to read on a 1080p display.
+//
+// Every size routes through fs(). This is a mutable module value rather than a
+// const because it is also a player setting: inline styles are computed during
+// render, so updating the value and re-rendering the root is enough for the
+// whole UI to follow. Callers must not cache fs() results across renders.
+export const UI_SCALES = { small: 1.0, medium: 1.35, large: 1.7 };
+export const DEFAULT_UI_SCALE = "medium";
+export const UI_SCALE_KEY = "speranza_ui_scale";
+
+let _uiScale = UI_SCALES[DEFAULT_UI_SCALE];
+export function setUiScale(name) {
+  _uiScale = UI_SCALES[name] ?? UI_SCALES[DEFAULT_UI_SCALE];
+}
+export function getUiScale() { return _uiScale; }
+
+/** Scale a design-time pixel value. Round to 0.1px so text stays crisp. */
+export function fs(px) { return Math.round(px * _uiScale * 10) / 10; }
+
 export const DRAIN_PER_COL = { food: 0.4, water: 0.4, energy: 0.2 };
 export function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
 

@@ -2,7 +2,7 @@
 // Props: grid, unlockedRows, excavations, selected, hoveredCell, mousePos, gridMetrics,
 //        colonists, hoveredColonist, onCellClick, onStartExcavation, onAssign,
 //        onSetHoveredCell, onHoverColonist
-import { ROOM_TYPES, EXCAVATION_DEFS, earthTexture, calcAdjacency } from "../gameData.js";
+import { ROOM_TYPES, EXCAVATION_DEFS, earthTexture, calcAdjacency, fs,} from "../gameData.js";
 import ColonistLayer from "./ColonistLayer.jsx";
 
 export default function ColonyGrid({
@@ -18,15 +18,15 @@ export default function ColonyGrid({
         const depthLabel = `${(r + 1) * 10}m`;
         return (
           <div key={r} style={{ display: "flex", position: "relative" }}>
-            <div className="depth-col" style={{ width: 28, background: "#07090f", borderRight: "1px solid #0d1020", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 8, color: "#1e3040", flexShrink: 0 }}>
+            <div className="depth-col" style={{ width: 28, background: "#07090f", borderRight: "1px solid #0d1020", display: "flex", alignItems: "center", justifyContent: "center", fontSize: fs(8), color: "#1e3040", flexShrink: 0 }}>
               -{depthLabel}
             </div>
 
             {isLocked ? (
               /* ── LOCKED ROW ── */
-              <div style={{ flex: 1, height: 78, background: "transparent", border: "none", borderBottom: "1px solid rgba(0,0,0,0.3)", position: "relative", zIndex: 5, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 14px" }}>
+              <div style={{ flex: 1, height: fs(78), background: "transparent", border: "none", borderBottom: "1px solid rgba(0,0,0,0.3)", position: "relative", zIndex: 5, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 14px" }}>
                 <div style={{ position: "relative", zIndex: 5 }}>
-                  <div style={{ color: "#334", fontSize: 10, letterSpacing: 1 }}>
+                  <div style={{ color: "#334", fontSize: fs(10), letterSpacing: 1 }}>
                     🔒 &nbsp;-{depthLabel} &nbsp;<span style={{ color: "#222" }}>SEALED — excavation required</span>
                   </div>
                   {excav && (
@@ -34,7 +34,7 @@ export default function ColonyGrid({
                       <div style={{ width: 140, height: 6, background: "#0d1020", borderRadius: 3, overflow: "hidden" }}>
                         <div style={{ height: "100%", borderRadius: 3, width: `${((excav.totalTicks - excav.ticksLeft) / excav.totalTicks) * 100}%`, background: "#a0522d", transition: "width 0.4s" }} />
                       </div>
-                      <span style={{ color: "#a0522d", fontSize: 8 }}>⛏ {excav.ticksLeft}t</span>
+                      <span style={{ color: "#a0522d", fontSize: fs(8) }}>⛏ {excav.ticksLeft}t</span>
                     </div>
                   )}
                 </div>
@@ -50,7 +50,7 @@ export default function ColonyGrid({
                         border: `1px solid ${prereqMet ? "#a0522d" : "#2a2020"}`,
                         borderRadius: 4, color: prereqMet ? "#a0522d" : "#3a2020",
                         padding: "5px 10px", cursor: prereqMet ? "pointer" : "not-allowed",
-                        fontSize: 9, letterSpacing: 1, fontFamily: "monospace",
+                        fontSize: fs(9), letterSpacing: 1, fontFamily: "monospace",
                         position: "relative", zIndex: 15,
                       }}
                     >{prereqMet ? `⛏ DIG (${EXCAVATION_DEFS[r]?.scrap ?? "?"}⚙)` : "🔒 DIG"}</button>
@@ -68,7 +68,7 @@ export default function ColonyGrid({
                     onMouseEnter={() => def && onSetHoveredCell({ r, c })}
                     onMouseLeave={() => onSetHoveredCell(null)}
                     style={{
-                      flex: 1, height: 78,
+                      flex: 1, height: fs(78),
                       border: isSel ? "2px solid #4ab3f4" : `1px solid ${def ? def.border + "33" : "#0d1020"}`,
                       background: def ? def.bg : "transparent",
                       cursor: "pointer",
@@ -89,25 +89,25 @@ export default function ColonyGrid({
                         minWidth: 130, maxWidth: 200, pointerEvents: "none",
                         boxShadow: `0 0 14px #00000099`,
                       }}>
-                        <div style={{ color: def.color, fontSize: 9, fontWeight: "bold", marginBottom: 4, display: "flex", alignItems: "center", gap: 6 }}>
+                        <div style={{ color: def.color, fontSize: fs(9), fontWeight: "bold", marginBottom: 4, display: "flex", alignItems: "center", gap: 6 }}>
                           {def.sprite
                             ? <img src={def.sprite} alt={def.label} style={{ width: 52, height: 52, imageRendering: "pixelated", objectFit: "contain" }} />
-                            : <div style={{ fontSize: 18 }}>{def.icon}</div>
+                            : <div style={{ fontSize: fs(18) }}>{def.icon}</div>
                           }
                           <span>{def.label}</span>
                         </div>
-                        {def.cap > 0 && <div style={{ color: "#8899aa", fontSize: 8, marginBottom: 2 }}>Workers: {grid[r][c].workers} / {def.cap}</div>}
+                        {def.cap > 0 && <div style={{ color: "#8899aa", fontSize: fs(8), marginBottom: 2 }}>Workers: {grid[r][c].workers} / {def.cap}</div>}
                         {Object.entries(def.produces).length > 0 && (
                           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 1 }}>
                             {Object.entries(def.produces).map(([res, amt]) => (
-                              <span key={res} style={{ color: "#7ed321", fontSize: 8 }}>+{amt * Math.max(1, grid[r][c].workers)} {res}/t</span>
+                              <span key={res} style={{ color: "#7ed321", fontSize: fs(8) }}>+{amt * Math.max(1, grid[r][c].workers)} {res}/t</span>
                             ))}
                           </div>
                         )}
                         {Object.entries(def.consumes).length > 0 && (
                           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 1 }}>
                             {Object.entries(def.consumes).map(([res, amt]) => (
-                              <span key={res} style={{ color: "#ff7755", fontSize: 8 }}>-{amt * Math.max(1, grid[r][c].workers)} {res}/t</span>
+                              <span key={res} style={{ color: "#ff7755", fontSize: fs(8) }}>-{amt * Math.max(1, grid[r][c].workers)} {res}/t</span>
                             ))}
                           </div>
                         )}
@@ -118,17 +118,17 @@ export default function ColonyGrid({
                           return (
                             <div style={{ marginTop: 4, paddingTop: 4, borderTop: "1px solid #1a2030" }}>
                               {adj.notes.map((n, i) => (
-                                <div key={i} style={{ color: n.good ? "#7ed321" : "#ff7755", fontSize: 7.5, lineHeight: 1.5 }}>
+                                <div key={i} style={{ color: n.good ? "#7ed321" : "#ff7755", fontSize: fs(7.5), lineHeight: 1.5 }}>
                                   {n.good ? "▲" : "▼"} {n.text}
                                 </div>
                               ))}
                             </div>
                           );
                         })()}
-                        {grid[r][c].damaged && <div style={{ color: "#ff8800", fontSize: 8, marginTop: 3 }}>⚠ DAMAGED — repair: 20 scrap</div>}
-                        {def.special === "hospital"   && grid[r][c].workers > 0 && <div style={{ color: "#ff6b9d", fontSize: 8, marginTop: 2 }}>Treating up to {grid[r][c].workers * 3} patients</div>}
-                        {def.special === "sentryPost" && <div style={{ color: "#e8d44d", fontSize: 8, marginTop: 2 }}>-{Math.min(60, grid[r][c].workers * 18)}% heat gain</div>}
-                        {!def.cap && !def.produces && <div style={{ color: "#556", fontSize: 8 }}>{def.desc}</div>}
+                        {grid[r][c].damaged && <div style={{ color: "#ff8800", fontSize: fs(8), marginTop: 3 }}>⚠ DAMAGED — repair: 20 scrap</div>}
+                        {def.special === "hospital"   && grid[r][c].workers > 0 && <div style={{ color: "#ff6b9d", fontSize: fs(8), marginTop: 2 }}>Treating up to {grid[r][c].workers * 3} patients</div>}
+                        {def.special === "sentryPost" && <div style={{ color: "#e8d44d", fontSize: fs(8), marginTop: 2 }}>-{Math.min(60, grid[r][c].workers * 18)}% heat gain</div>}
+                        {!def.cap && !def.produces && <div style={{ color: "#556", fontSize: fs(8) }}>{def.desc}</div>}
                       </div>
                     )}
 
@@ -138,7 +138,7 @@ export default function ColonyGrid({
                           <>
                             <img src={def.sprite} alt={def.label} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", imageRendering: "pixelated", objectFit: "cover", objectPosition: "center" }} />
                             <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "linear-gradient(transparent, rgba(0,0,0,0.75))", padding: "6px 4px 3px", display: "flex", flexDirection: "column", alignItems: "center" }}>
-                              <div style={{ fontSize: 7, color: def.color, fontWeight: "bold", letterSpacing: 0.5, textShadow: "0 1px 3px #000" }}>{def.label}</div>
+                              <div style={{ fontSize: fs(8), color: def.color, fontWeight: "bold", letterSpacing: 0.5, textShadow: "0 1px 3px #000" }}>{def.label}</div>
                               {def.cap > 0 && (
                                 <div style={{ display: "flex", gap: 3, marginTop: 2 }}>
                                   {Array.from({ length: def.cap }).map((_, i) => {
@@ -165,8 +165,8 @@ export default function ColonyGrid({
                           </>
                         ) : (
                           <>
-                            <div style={{ fontSize: 20 }}>{def.icon}</div>
-                            <div style={{ fontSize: 7, color: def.color, fontWeight: "bold", letterSpacing: 0.5 }}>{def.label}</div>
+                            <div style={{ fontSize: fs(20) }}>{def.icon}</div>
+                            <div style={{ fontSize: fs(8), color: def.color, fontWeight: "bold", letterSpacing: 0.5 }}>{def.label}</div>
                             {def.cap > 0 && (
                               <div style={{ display: "flex", gap: 3, marginTop: 4 }}>
                                 {Array.from({ length: def.cap }).map((_, i) => {
@@ -193,12 +193,12 @@ export default function ColonyGrid({
                         )}
                         {cell.damaged && (
                           <div style={{ position: "absolute", inset: 0, background: "#ff000018", border: "2px solid #ff4444", pointerEvents: "none", display: "flex", alignItems: "flex-start", justifyContent: "flex-end", padding: 3 }}>
-                            <span style={{ fontSize: 10 }}>⚠</span>
+                            <span style={{ fontSize: fs(10) }}>⚠</span>
                           </div>
                         )}
                       </>
                     ) : (
-                      <div style={{ color: "#151e2a", fontSize: 16 }}>+</div>
+                      <div style={{ color: "#151e2a", fontSize: fs(16) }}>+</div>
                     )}
                   </div>
                 );

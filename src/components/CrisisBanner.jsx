@@ -7,8 +7,7 @@
 // Props: res, netFlow, deprivedTicks
 import {
   ticksToEmpty, deprivationStage,
-  DEPRIVE_COLLAPSE_TICKS, DEPRIVE_DEATH_TICKS,
-} from "../gameData.js";
+  DEPRIVE_COLLAPSE_TICKS, DEPRIVE_DEATH_TICKS, fs,} from "../gameData.js";
 
 const TRACKED = [
   { key: "food",   label: "FOOD",   icon: "🌱" },
@@ -35,7 +34,7 @@ export default function CrisisBanner({ res, netFlow, deprivedTicks = 0 }) {
 
     return (
       <div style={{
-        width: "100%", maxWidth: 920, marginBottom: 8,
+        width: "100%", maxWidth: fs(920), marginBottom: 8,
         background: `linear-gradient(90deg, ${copy.color}22, ${copy.color}0d)`,
         border: `1px solid ${copy.color}`,
         borderRadius: 6, padding: "7px 12px",
@@ -43,10 +42,10 @@ export default function CrisisBanner({ res, netFlow, deprivedTicks = 0 }) {
         gap: 12, position: "relative", zIndex: 3,
         animation: "crisisPulse 1.1s infinite",
       }}>
-        <div style={{ color: copy.color, fontSize: 11, letterSpacing: 2, fontWeight: "bold" }}>
+        <div style={{ color: copy.color, fontSize: fs(11), letterSpacing: 2, fontWeight: "bold" }}>
           🚨 {copy.text}
         </div>
-        <div style={{ color: "#c8d0d8", fontSize: 8, letterSpacing: 1, opacity: 0.85 }}>
+        <div style={{ color: "#c8d0d8", fontSize: fs(8), letterSpacing: 1, opacity: 0.85 }}>
           STAFF HYDROPONICS / WATER RECYCLER — OR PULL PEOPLE OFF OTHER POSTS
         </div>
         <style>{`@keyframes crisisPulse { 0%,100%{opacity:1} 50%{opacity:0.72} }`}</style>
@@ -67,19 +66,19 @@ export default function CrisisBanner({ res, netFlow, deprivedTicks = 0 }) {
 
   return (
     <div style={{
-      width: "100%", maxWidth: 920, marginBottom: 8,
+      width: "100%", maxWidth: fs(920), marginBottom: 8,
       background: urgent ? "#2a0d00" : "#1a1400",
       border: `1px solid ${urgent ? "#ff7722" : "#8a6a20"}`,
       borderRadius: 6, padding: "6px 12px",
       display: "flex", alignItems: "center", gap: 14,
       position: "relative", zIndex: 3,
     }}>
-      <div style={{ color: urgent ? "#ff9944" : "#d4a843", fontSize: 10, letterSpacing: 2, fontWeight: "bold" }}>
+      <div style={{ color: urgent ? "#ff9944" : "#d4a843", fontSize: fs(10), letterSpacing: 2, fontWeight: "bold" }}>
         ⚠ SUPPLY WARNING
       </div>
       <div style={{ display: "flex", gap: 14, flex: 1, flexWrap: "wrap" }}>
         {failing.map(f => (
-          <span key={f.key} style={{ fontSize: 9, color: f.ticks <= 24 ? "#ff6644" : "#c8a04a", fontFamily: "monospace" }}>
+          <span key={f.key} style={{ fontSize: fs(9), color: f.ticks <= 24 ? "#ff6644" : "#c8a04a", fontFamily: "monospace" }}>
             {f.icon} {f.label} out in <strong>{f.ticks}t</strong>
             <span style={{ opacity: 0.6 }}> (~{(f.ticks / 48).toFixed(1)}d)</span>
           </span>

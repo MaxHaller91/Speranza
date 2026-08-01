@@ -7,7 +7,7 @@
 //
 // Like every other overlay, this does NOT touch the clock. `directivesScreenOpen`
 // is a pause reason in Speranza.jsx. See "Pause ownership".
-import { MAX_ACTIVE_DIRECTIVES } from "../gameData.js";
+import { MAX_ACTIVE_DIRECTIVES, fs,} from "../gameData.js";
 
 export default function DirectivesScreen({ directives, active, onToggle, onClose }) {
   const activeSet = new Set(active);
@@ -26,12 +26,12 @@ export default function DirectivesScreen({ directives, active, onToggle, onClose
         padding: "20px 22px", boxShadow: "0 0 40px #4ab3f422",
       }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
-          <div style={{ color: "#4ab3f4", fontSize: 14, letterSpacing: 3 }}>📋 DIRECTIVES</div>
-          <div style={{ color: atMax ? "#ff8e8e" : "#7ed321", fontSize: 13, fontFamily: "monospace" }}>
-            {active.length} / {MAX_ACTIVE_DIRECTIVES} <span style={{ color: "#3a5a2a", fontSize: 9, letterSpacing: 1 }}>ACTIVE</span>
+          <div style={{ color: "#4ab3f4", fontSize: fs(14), letterSpacing: 3 }}>📋 DIRECTIVES</div>
+          <div style={{ color: atMax ? "#ff8e8e" : "#7ed321", fontSize: fs(13), fontFamily: "monospace" }}>
+            {active.length} / {MAX_ACTIVE_DIRECTIVES} <span style={{ color: "#3a5a2a", fontSize: fs(9), letterSpacing: 1 }}>ACTIVE</span>
           </div>
         </div>
-        <div style={{ color: "#2a4a6a", fontSize: 8, letterSpacing: 1, marginBottom: 14, lineHeight: 1.6 }}>
+        <div style={{ color: "#2a4a6a", fontSize: fs(8), letterSpacing: 1, marginBottom: 14, lineHeight: 1.6 }}>
           Standing colony law. Every benefit has a cost — pick what this run needs.
         </div>
 
@@ -46,13 +46,13 @@ export default function DirectivesScreen({ directives, active, onToggle, onClose
                 border: `1px solid ${have ? "#7ed32155" : "#16202c"}`,
                 borderRadius: 5, padding: "9px 11px",
               }}>
-                <div style={{ fontSize: 15, width: 20, textAlign: "center", opacity: have ? 1 : 0.55 }}>{d.icon}</div>
+                <div style={{ fontSize: fs(15), width: 20, textAlign: "center", opacity: have ? 1 : 0.55 }}>{d.icon}</div>
                 <div style={{ flex: 1 }}>
-                  <div style={{ color: have ? "#7ed321" : "#8fa4b8", fontSize: 10, fontWeight: "bold", letterSpacing: 1 }}>
+                  <div style={{ color: have ? "#7ed321" : "#8fa4b8", fontSize: fs(10), fontWeight: "bold", letterSpacing: 1 }}>
                     {d.label}
                   </div>
-                  <div style={{ color: "#5a6a7a", fontSize: 9, marginTop: 2, lineHeight: 1.45 }}>{d.desc}</div>
-                  <div style={{ marginTop: 4, display: "flex", gap: 10, fontSize: 8, letterSpacing: 0.5 }}>
+                  <div style={{ color: "#5a6a7a", fontSize: fs(9), marginTop: 2, lineHeight: 1.45 }}>{d.desc}</div>
+                  <div style={{ marginTop: 4, display: "flex", gap: 10, fontSize: fs(8), letterSpacing: 0.5 }}>
                     <span style={{ color: "#7ed321" }}>+ {d.benefit}</span>
                     <span style={{ color: "#ff8e8e" }}>− {d.cost}</span>
                   </div>
@@ -67,7 +67,7 @@ export default function DirectivesScreen({ directives, active, onToggle, onClose
                     borderRadius: 4, padding: "7px 11px",
                     cursor: disabled ? "not-allowed" : "pointer",
                     color: have ? "#ff8e8e" : disabled ? "#3a4450" : "#4ab3f4",
-                    fontSize: 10, fontFamily: "'Courier New', monospace", letterSpacing: 1,
+                    fontSize: fs(10), fontFamily: "'Courier New', monospace", letterSpacing: 1,
                     whiteSpace: "nowrap",
                   }}
                 >{have ? "RESCIND" : "ENACT"}</button>
@@ -79,7 +79,7 @@ export default function DirectivesScreen({ directives, active, onToggle, onClose
         <button onClick={onClose} style={{
           width: "100%", marginTop: 16, background: "#0a0c14",
           border: "1px solid #1a3040", borderRadius: 6, color: "#4a6a8a",
-          padding: "10px", cursor: "pointer", fontSize: 11, letterSpacing: 3,
+          padding: "10px", cursor: "pointer", fontSize: fs(11), letterSpacing: 3,
           fontFamily: "'Courier New', monospace",
         }}>✕ CLOSE</button>
       </div>

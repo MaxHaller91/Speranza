@@ -1,3 +1,4 @@
+import { fs } from "../gameData.js";
 // ToastPanel.jsx — toast notifications + milestone toast + pause indicator
 // Props: toasts, milestoneToast, onDismiss(id), onDismissAll
 
@@ -15,10 +16,10 @@ export default function ToastPanel({ toasts, milestoneToast, onDismiss, onDismis
         animation: "toastIn 0.2s ease-out",
         textAlign: "center",
       }}>
-        <div style={{ color: "#ffd700", fontSize: 11, fontWeight: "bold", letterSpacing: 2, marginBottom: 5 }}>
+        <div style={{ color: "#ffd700", fontSize: fs(11), fontWeight: "bold", letterSpacing: 2, marginBottom: 5 }}>
           ★ {milestoneToast.title}
         </div>
-        <div style={{ color: "#c8c0a0", fontSize: 9, lineHeight: 1.6 }}>{milestoneToast.text}</div>
+        <div style={{ color: "#c8c0a0", fontSize: fs(9), lineHeight: 1.6 }}>{milestoneToast.text}</div>
       </div>
     )}
 
@@ -33,7 +34,7 @@ export default function ToastPanel({ toasts, milestoneToast, onDismiss, onDismis
             toasts stopped the clock. They no longer do (they are not pause
             reasons), so the label was telling the player the game was paused
             while it carried on running. */}
-        <div style={{ fontSize: 8, color: "#f5a623", letterSpacing: 2, background: "#1a0d00", border: "1px solid #f5a62344", borderRadius: 4, padding: "2px 10px" }}>
+        <div style={{ fontSize: fs(8), color: "#f5a623", letterSpacing: 2, background: "#1a0d00", border: "1px solid #f5a62344", borderRadius: 4, padding: "2px 10px" }}>
           ⚠ {toasts.length} NOTIFICATION{toasts.length === 1 ? "" : "S"}
         </div>
         {toasts.map(toast => {
@@ -62,13 +63,13 @@ export default function ToastPanel({ toasts, milestoneToast, onDismiss, onDismis
               <button onClick={() => onDismiss(toast.id)} style={{
                 position: "absolute", top: 6, right: 8,
                 background: "none", border: "none", cursor: "pointer",
-                color: styles.border, fontSize: 13, lineHeight: 1, opacity: 0.7, padding: 2,
+                color: styles.border, fontSize: fs(13), lineHeight: 1, opacity: 0.7, padding: 2,
               }}>✕</button>
-              <div style={{ color: styles.title, fontSize: 11, fontWeight: "bold", letterSpacing: 1.5, marginBottom: bodyLines.length ? 4 : 0, paddingRight: 16 }}>
+              <div style={{ color: styles.title, fontSize: fs(11), fontWeight: "bold", letterSpacing: 1.5, marginBottom: bodyLines.length ? 4 : 0, paddingRight: 16 }}>
                 {titleLine}
               </div>
               {bodyLines.map((line, i) => (
-                <div key={i} style={{ color: "#8a9aaa", fontSize: 10, lineHeight: 1.6 }}>{line}</div>
+                <div key={i} style={{ color: "#8a9aaa", fontSize: fs(10), lineHeight: 1.6 }}>{line}</div>
               ))}
             </div>
           );
@@ -76,7 +77,7 @@ export default function ToastPanel({ toasts, milestoneToast, onDismiss, onDismis
         {toasts.length > 1 && (
           <button onClick={onDismissAll} style={{
             background: "#0a0c14", border: "1px solid #2a3545", borderRadius: 4,
-            color: "#445", padding: "4px 14px", cursor: "pointer", fontSize: 9, letterSpacing: 1,
+            color: "#445", padding: "4px 14px", cursor: "pointer", fontSize: fs(9), letterSpacing: 1,
           }}>DISMISS ALL</button>
         )}
       </div>

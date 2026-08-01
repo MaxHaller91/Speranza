@@ -50,6 +50,7 @@ import {
   reconcileGridWorkers, pruneInvalidAssignments, postStatusFor, isOnPost,
   occupiedSeats, reclaimPost, advanceExpeditions,
   calcAdjacency, calcAdjacencyMorale,
+  fs, setUiScale, UI_SCALES, DEFAULT_UI_SCALE, UI_SCALE_KEY,
 } from "./gameData.js";
 import SurfaceDefense from './surface_defense';
 import SkyBackground   from './components/SkyBackground.jsx';
@@ -137,7 +138,7 @@ export default function Speranza() {
   const [hoveredColonist,    setHoveredColonist]    = useState(null);
   const [hoveredFlowStat,    setHoveredFlowStat]    = useState(null);
   const [mousePos,           setMousePos]           = useState({ x: 0, y: 0 });
-  const [gridMetrics,        setGridMetrics]        = useState({ cellW: 96, cellH: 78, depthCol: 28, surfaceBarH: 24 });
+  const [gridMetrics,        setGridMetrics]        = useState({ cellW: fs(96), cellH: fs(78), depthCol: fs(28), surfaceBarH: fs(24) });
   const [statBreakdown, setStatBreakdown] = useState({
     energy: { ...EMPTY_STAT_BREAKDOWN },
     food: { ...EMPTY_STAT_BREAKDOWN },
@@ -169,6 +170,22 @@ export default function Speranza() {
   // False until the player presses BEGIN on the start screen. Loading a save
   // also counts as starting — you already have a colony at that point.
   const [runStarted, setRunStarted] = useState(false);
+
+  // UI scale. Applied to the module during the initialiser, before the first
+  // render, so fs() is already correct when styles are computed -- doing it in a
+  // useEffect would run a frame late and the whole UI would visibly jump.
+  const [uiScale, setUiScaleState] = useState(() => {
+    let name = DEFAULT_UI_SCALE;
+    try { const saved = localStorage.getItem(UI_SCALE_KEY); if (UI_SCALES[saved]) name = saved; } catch {}
+    setUiScale(name);
+    return name;
+  });
+  const changeUiScale = (name) => {
+    if (!UI_SCALES[name]) return;
+    setUiScale(name);          // module value first...
+    setUiScaleState(name);     // ...then re-render, so every fs() is re-evaluated
+    try { localStorage.setItem(UI_SCALE_KEY, name); } catch {}
+  };
 
   // ── Meta-progression ──────────────────────────────────────────────────────
   // Resolve and talents deliberately live OUTSIDE the run save. They survive
@@ -2875,6 +2892,8 @@ ${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelte
         onRenameColony={setColonyName}
         resolve={resolve}
         onOpenTalents={() => setTalentScreenOpen(true)}
+        uiScale={uiScale}
+        onChangeUiScale={changeUiScale}
         activeDirectivesCount={activeDirectives.length}
         onOpenDirectives={() => setDirectivesScreenOpen(true)}
         timescale={timescale}
@@ -2977,7 +2996,7 @@ ${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelte
       )}
 
       {/* ── MAIN LAYOUT ── */}
-      <div style={{ display: "flex", gap: 12, width: "100%", maxWidth: 920, position: "relative", zIndex: 1 }}>
+      <div style={{ display: "flex", gap: 12, width: "100%", maxWidth: fs(920), position: "relative", zIndex: 1 }}>
 
         {/* Grid column */}
         <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
@@ -3036,7 +3055,7 @@ ${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelte
             onHoverColonist={setHoveredColonist}
           />
 
-          <div style={{ marginTop: 5, fontSize: 8, color: "#1a2535", letterSpacing: 1 }}>
+          <div style={{ marginTop: 5, fontSize: fs(8), color: "#1a2535", letterSpacing: 1 }}>
             CLICK EMPTY CELL TO BUILD · CLICK CIRCLES TO ASSIGN WORKERS
           </div>
         </div>
@@ -3083,7 +3102,7 @@ ${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelte
         />
       </div>
 
-      <div style={{ maxWidth: 920, width: "100%", marginTop: 6, fontSize: 8, color: "#1a2535", letterSpacing: 1, textAlign: "center" }}>
+      <div style={{ maxWidth: fs(920), width: "100%", marginTop: 6, fontSize: fs(8), color: "#1a2535", letterSpacing: 1, textAlign: "center" }}>
         BUILD ARMORY + ASSIGN ARMORER → LAUNCH EXPEDITIONS · HIGH THREAT = ARC RAIDS · WORKSHOP IS YOUR LIFELINE
       </div>
 

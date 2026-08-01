@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { RAID_SIZES as COLONY_RAID_SIZES } from "./gameData.js";
+import { RAID_SIZES as COLONY_RAID_SIZES, fs,} from "./gameData.js";
 
 // ─── CONSTANTS ───────────────────────────────────────────────────────────────
 const W = 800;
@@ -1192,7 +1192,7 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
     }}>
       {/* When inactive: just show the surface label bar */}
       {!active && (
-        <div className="surface-bar" style={{ width: "100%", background: "#0a1a0a", borderBottom: "1px dashed #2a4a2a", padding: "4px 10px", fontSize: 9, color: "#3a5a3a", letterSpacing: 2 }}>
+        <div className="surface-bar" style={{ width: "100%", background: "#0a1a0a", borderBottom: "1px dashed #2a4a2a", padding: "4px 10px", fontSize: fs(9), color: "#3a5a3a", letterSpacing: 2 }}>
           ▲ SURFACE — ARC CONTROLLED ZONE
         </div>
       )}
@@ -1228,10 +1228,10 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
         alignItems: "center",
         justifyContent: "space-between",
       }}>
-        <span style={{ color: "#2a5a2a", fontSize: 9, letterSpacing: 3 }}>
+        <span style={{ color: "#2a5a2a", fontSize: fs(9), letterSpacing: 3 }}>
           ▲ SURFACE — ARC CONTROLLED ZONE
         </span>
-        <span style={{ color: "#4ab3f4", fontSize: 9, letterSpacing: 2 }}>
+        <span style={{ color: "#4ab3f4", fontSize: fs(9), letterSpacing: 2 }}>
           {phase === "prep" ? `WAVE ${waveIdx + 1} — PLACE DEFENSES` :
            phase === "intermission" ? `WAVE ${waveIdx + 1} — NEXT WAVE IN ${countdown}s` :
            phase === "combat" ? `WAVE ${waveIdx + 1} — COMBAT` :
@@ -1252,12 +1252,12 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
         flexWrap: "wrap",
       }}>
         {/* Scrap */}
-        <div style={{ color: "#a855f7", fontSize: 10, letterSpacing: 1, minWidth: 80 }}>
+        <div style={{ color: "#a855f7", fontSize: fs(10), letterSpacing: 1, minWidth: 80 }}>
           🔧 BUDGET: {Math.round(scrap)}
         </div>
 
         {/* Hatch HP */}
-        <div style={{ color: hatchHp < 40 ? "#cc2200" : "#22cc44", fontSize: 10, letterSpacing: 1, minWidth: 100 }}>
+        <div style={{ color: hatchHp < 40 ? "#cc2200" : "#22cc44", fontSize: fs(10), letterSpacing: 1, minWidth: 100 }}>
           ▼ HATCH: {Math.round((hatchHp / (100 + hatchHpBonus)) * 100)}%
         </div>
 
@@ -1283,7 +1283,7 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
         {(phase === "prep" || phase === "intermission") && <>
           {Object.entries(DEFENSE_TYPES).map(([key, def]) => (
             <button key={key} onClick={() => setSelectedTool(key)} style={{
-              fontFamily: "monospace", fontSize: 8, letterSpacing: 1,
+              fontFamily: "monospace", fontSize: fs(8), letterSpacing: 1,
               padding: "4px 8px",
               background: selectedTool === key ? `${def.color}22` : "rgba(255,255,255,0.03)",
               border: `1px solid ${selectedTool === key ? def.color : "#222"}`,
@@ -1300,7 +1300,7 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
             { key: "sell",    label: "✕ SELL",     color: "#aa5544" },
           ].map(t => (
             <button key={t.key} onClick={() => setSelectedTool(t.key)} style={{
-              fontFamily: "monospace", fontSize: 8, letterSpacing: 1,
+              fontFamily: "monospace", fontSize: fs(8), letterSpacing: 1,
               padding: "4px 8px",
               background: selectedTool === t.key ? `${t.color}22` : "rgba(255,255,255,0.03)",
               border: `1px solid ${selectedTool === t.key ? t.color : "#222"}`,
@@ -1313,7 +1313,7 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
         {/* Combat ability — the only thing the player can do mid-fight. */}
         {phase === "combat" && (
           <button onClick={fireEmp} disabled={empCharges <= 0} style={{
-            fontFamily: "monospace", fontSize: 9, letterSpacing: 1,
+            fontFamily: "monospace", fontSize: fs(9), letterSpacing: 1,
             padding: "4px 10px",
             background: empCharges > 0 ? "rgba(80,180,255,0.14)" : "rgba(255,255,255,0.02)",
             border: `1px solid ${empCharges > 0 ? "#4ab3f4" : "#222"}`,
@@ -1330,7 +1330,7 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
         {/* Action button */}
         {phase === "prep" && (
           <button onClick={() => startWave(stateRef.current.waveIdx)} style={{
-            fontFamily: "monospace", fontSize: 9, letterSpacing: 2,
+            fontFamily: "monospace", fontSize: fs(9), letterSpacing: 2,
             padding: "5px 16px",
             background: "rgba(200,50,20,0.15)",
             border: "1px solid #cc3311",
@@ -1342,12 +1342,12 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
           </button>
         )}
         {phase === "intermission" && (
-          <span style={{ color: "#ff8800", fontSize: 9, letterSpacing: 2 }}>
+          <span style={{ color: "#ff8800", fontSize: fs(9), letterSpacing: 2 }}>
             ⏱ NEXT WAVE IN {countdown}s — PLACE DEFENSES
           </span>
         )}
         {phase === "combat" && (
-          <span style={{ color: "#cc3311", fontSize: 9, letterSpacing: 2, animation: "pulse 1s infinite" }}>
+          <span style={{ color: "#cc3311", fontSize: fs(9), letterSpacing: 2, animation: "pulse 1s infinite" }}>
             ● RAID IN PROGRESS
           </span>
         )}
@@ -1363,21 +1363,21 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
           const air = (comp.drone ?? 0) + (comp.gunship ?? 0);
           return (
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4, flexWrap: "wrap" }}>
-              <span style={{ color: "#8a6a2a", fontSize: 8, letterSpacing: 1 }}>INCOMING WAVE {waveIdx + 1}:</span>
+              <span style={{ color: "#8a6a2a", fontSize: fs(8), letterSpacing: 1 }}>INCOMING WAVE {waveIdx + 1}:</span>
               {Object.entries(comp).map(([type, n]) => (
-                <span key={type} style={{ color: type === "gunship" ? "#ff5522" : type === "heavy" ? "#cc6644" : "#7a8a9a", fontSize: 9, fontFamily: "monospace" }}>
+                <span key={type} style={{ color: type === "gunship" ? "#ff5522" : type === "heavy" ? "#cc6644" : "#7a8a9a", fontSize: fs(9), fontFamily: "monospace" }}>
                   {ICONS[type] ?? "•"} {n}× {type}
                 </span>
               ))}
               {air > 0 && (
-                <span style={{ color: "#ff8844", fontSize: 8, letterSpacing: 1 }}>
+                <span style={{ color: "#ff8844", fontSize: fs(8), letterSpacing: 1 }}>
                   ⚠ {air} AIR — turrets do half damage
                 </span>
               )}
             </div>
           );
         })()}
-        <div style={{ color: "#223", fontSize: 8, letterSpacing: 1 }}>
+        <div style={{ color: "#223", fontSize: fs(8), letterSpacing: 1 }}>
           {(phase === "prep" || phase === "intermission")
             ? "CLICK TO BUILD · UPGRADE / REPAIR / SELL EXISTING EMPLACEMENTS · TURRETS AUTO-FIRE · MISSILES LONG RANGE"
             : phase === "combat" ? "DEFEND THE HATCH · EARN SCRAP FROM KILLS · EMP BURST STUNS GROUND UNITS"
@@ -1396,7 +1396,7 @@ export default function SurfaceDefense({ active = true, scrap: initialScrap = 80
           border: "1px solid #cc3311",
           color: "#ff4422",
           fontFamily: "monospace",
-          fontSize: 13, letterSpacing: 3,
+          fontSize: fs(13), letterSpacing: 3,
           padding: "10px 24px",
           pointerEvents: "none",
           zIndex: 100,

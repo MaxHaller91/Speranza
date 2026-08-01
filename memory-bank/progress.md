@@ -559,6 +559,32 @@ them. **Whoever scripts the next soak-test harness: space dev-hook action
 calls with an `await` on a render tick, the same caution already written down
 for `sandboxTopUp`/`sandboxMorale`.**
 
+## UI scale pass (step 3) - 2026-08-01 (opus-5)
+
+Body text was 7-9px throughout - the most obvious "hobby project" tell on a
+store page and genuinely hard to read on a 1080p display.
+
+- `fs(px)` + `UI_SCALES` in `gameData.js`. Deliberately a **mutable module
+  value, not a const**, because it is also a player setting: inline styles are
+  computed during render, so updating the module value and re-rendering the root
+  is enough for the whole UI to follow. Callers must not cache `fs()` results.
+- Swept **286 `fontSize:` sites** across 19 files by script, then added the
+  import to each. Anything below `fs(8)` (one `fs(6)`, 32 `fs(7)`) was raised to
+  the floor - those were unreadable even scaled.
+- Layout containers scale too, or text overflows its boxes: `maxWidth: 920` (7
+  sites), the 205px side panel, 78px grid rows, and the seeded `gridMetrics`.
+- Canvas name tags in `ColonistLayer` were DPR-scaled but not UI-scaled, so they
+  stayed tiny while every other label grew. Now routed through `fs()` as well.
+- Setting cycles Small / Medium / Large from a header button, persisted in
+  `speranza_ui_scale`. The scale is applied in the `useState` initialiser rather
+  than a `useEffect`, so the first render is already correct - an effect would
+  run a frame late and the whole UI would visibly jump.
+
+Verified in-browser: min font 8 / 10.8 / 13px across the three scales (exactly
+1.0x / 1.35x / 1.7x of the 8px floor), median body text up from ~9px to 16px,
+**no horizontal overflow at any scale**, and the setting survives a reload
+including on the start screen. Checked at 1920x1080 and 1280x900.
+
 ## Known Issues / Limitations ⚠️
 
 ### Save System Validation Pending

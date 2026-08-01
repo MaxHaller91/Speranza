@@ -18,7 +18,7 @@
 // Props: colonists, grid, unlockedRows, excavations, gridMetrics, mousePos,
 //        onHoverColonist
 import { useEffect, useRef } from "react";
-import { ROOM_TYPES, STATUS_COLOR, isOnPost } from "../gameData.js";
+import { ROOM_TYPES, STATUS_COLOR, isOnPost, fs} from "../gameData.js";
 
 const COLS = 7;
 const ROWS = 4;
@@ -259,7 +259,7 @@ export function drawColonist(ctx, a, t) {
     ctx.restore();
 
     ctx.fillStyle = "#ff5555";                            // casualty marker
-    ctx.font = "bold 8px monospace";
+    ctx.font = `bold ${fs(8)}px monospace`;
     ctx.textAlign = "center";
     ctx.fillText("✚", a.x, a.y - 13);
     return;
@@ -352,7 +352,7 @@ export function drawColonist(ctx, a, t) {
   // Injured colonists get an unmissable marker.
   if (a.status === "injured") {
     ctx.fillStyle = "#ff5555";
-    ctx.font = "bold 8px monospace";
+    ctx.font = `bold ${fs(8)}px monospace`;
     ctx.textAlign = "center";
     ctx.fillText("✚", a.x, a.y - bodyH - legH - 10);
   }
@@ -537,7 +537,7 @@ export default function ColonistLayer({
       if (hoverRef.current) {
         const a = agents.get(hoverRef.current);
         if (a) {
-          ctx.font = "bold 7px monospace";
+          ctx.font = `bold ${fs(7)}px monospace`;
           ctx.textAlign = "center";
           const w = ctx.measureText(a.name).width + 6;
           ctx.fillStyle = "rgba(6,10,18,0.9)";

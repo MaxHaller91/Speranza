@@ -38,6 +38,8 @@ first** — it contains two invariants that, if broken, silently corrupt the gam
       `setTimescale` callers reduced to one owner
 - [x] Floats fixed at source + Traders wired — **Step 2a**
 - [x] Artifacts wired, plus a level-up announcement bug it exposed — **Step 2b**
+- [x] **Step 3** — UI scale pass: 286 font sites routed through `fs()`, nothing
+      below 10.8px at default, Small/Medium/Large setting persisted
 - [x] Colony Directives wired — **Step 2c**: 7 toggleable standing orders
       (`DIRECTIVES` in `speranza-lore.js`), max 3 active, gated on a built
       Research Lab, mechanics in `directiveEffects()`/`DIRECTIVE_MECHANICS`
@@ -76,7 +78,6 @@ an interactive harness or a human playtest session.
 
 9b (2-D tower-defense placement) stays gated behind that day-25 playtest.
 
-- [ ] **Step 3** — UI scale pass for Steam · `03-ui-scale-pass.md` — CLAIMED interactive-session 2026-08-01
 - [ ] **Step 4** — Game-over as an obituary · `04-game-over-obituary.md`
 - [ ] **Step 5** — Morale visible as behaviour · `05-morale-as-behaviour.md`
 - [ ] **Step 7** — Variable room sizes (silhouette) · `07-variable-room-sizes.md`

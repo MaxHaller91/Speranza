@@ -1,7 +1,7 @@
 // BuildMenu.jsx — build room modal
 // Props: res, surfaceHaul, unlockedTechs, mousePos,
 //        hoveredBuildKey, onHoverBuildKey, onBuild, onClose
-import { ROOM_TYPES, T2_TECHS } from "../gameData.js";
+import { ROOM_TYPES, T2_TECHS, fs,} from "../gameData.js";
 
 export default function BuildMenu({ res, surfaceHaul, unlockedTechs, mousePos, hoveredBuildKey, onHoverBuildKey, onBuild, onClose }) {
   return (
@@ -14,7 +14,7 @@ export default function BuildMenu({ res, surfaceHaul, unlockedTechs, mousePos, h
         background: "#080b14", border: "1px solid #1e3a5f", borderRadius: 8,
         padding: 14, display: "flex", flexDirection: "column",
       }}>
-        <div style={{ color: "#4ab3f4", fontSize: 12, letterSpacing: 2, marginBottom: 10, textAlign: "center" }}>BUILD ROOM</div>
+        <div style={{ color: "#4ab3f4", fontSize: fs(12), letterSpacing: 2, marginBottom: 10, textAlign: "center" }}>BUILD ROOM</div>
 
         <div style={{
           display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(74px, 1fr))",
@@ -43,8 +43,8 @@ export default function BuildMenu({ res, surfaceHaul, unlockedTechs, mousePos, h
                   display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 1,
                   aspectRatio: "1 / 1", minHeight: "unset",
                 }}>
-                <div style={{ fontSize: 19, lineHeight: 1 }}>{def.icon}</div>
-                <div style={{ fontSize: 8, fontWeight: "bold", textAlign: "center", letterSpacing: 0.2, lineHeight: 1.1 }}>
+                <div style={{ fontSize: fs(19), lineHeight: 1 }}>{def.icon}</div>
+                <div style={{ fontSize: fs(8), fontWeight: "bold", textAlign: "center", letterSpacing: 0.2, lineHeight: 1.1 }}>
                   {def.label.length > 12 ? `${def.label.slice(0, 12)}…` : def.label}
                 </div>
               </button>
@@ -70,14 +70,14 @@ export default function BuildMenu({ res, surfaceHaul, unlockedTechs, mousePos, h
               position: "fixed",
               left: mousePos.x + 12, top: mousePos.y + 12,
               background: "#0d1020", border: `1px solid ${def.border}55`,
-              borderRadius: 6, padding: "7px 9px", fontSize: 8,
+              borderRadius: 6, padding: "7px 9px", fontSize: fs(8),
               zIndex: 9999, pointerEvents: "none", minWidth: 170, maxWidth: 240,
               boxShadow: "0 0 16px #00000088",
             }}>
-              <div style={{ color: def.color, fontSize: 9, fontWeight: "bold", marginBottom: 3, display: "flex", alignItems: "center", gap: 6 }}>
+              <div style={{ color: def.color, fontSize: fs(9), fontWeight: "bold", marginBottom: 3, display: "flex", alignItems: "center", gap: 6 }}>
                 {def.sprite
                   ? <img src={def.sprite} alt={def.label} style={{ width: 52, height: 52, imageRendering: "pixelated", objectFit: "contain" }} />
-                  : <div style={{ fontSize: 18 }}>{def.icon}</div>
+                  : <div style={{ fontSize: fs(18) }}>{def.icon}</div>
                 }
                 <span>{def.label}</span>
               </div>
@@ -92,7 +92,7 @@ export default function BuildMenu({ res, surfaceHaul, unlockedTechs, mousePos, h
 
         <button onClick={onClose} style={{
           width: "100%", background: "none", border: "1px solid #1e2a3a",
-          borderRadius: 4, color: "#445", padding: 6, cursor: "pointer", fontSize: 10, marginTop: 8,
+          borderRadius: 4, color: "#445", padding: 6, cursor: "pointer", fontSize: fs(10), marginTop: 8,
         }}>CANCEL</button>
       </div>
     </div>
