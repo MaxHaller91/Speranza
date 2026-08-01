@@ -117,6 +117,65 @@ export const DIFFICULTIES = {
 export const DIFFICULTY_ORDER = ["settler", "survivor", "condemned"];
 export const DEFAULT_DIFFICULTY = "survivor";
 
+// ─── Traders ─────────────────────────────────────────────────────────────────
+// `TRADERS` in speranza-lore.js was fully authored and imported by nothing —
+// eight named characters with a specialty each, and a dormant `tradersVisited`
+// milestone trigger waiting for them. This wires them up.
+//
+// A trader arrives, offers a bounded swap, and leaves after a while. Gated on
+// the Radio Tower so that building earns a second purpose beyond raid ID.
+export const TRADER_CHECK_EVERY = 60;   // ticks between arrival rolls
+export const TRADER_CHANCE      = 0.45;
+export const TRADER_STAY_TICKS  = 30;   // how long an offer stands before they go
+
+/**
+ * What a trader will deal in, from their specialty. Pure and data-only so the
+ * offers can be unit-tested and so the tick loop stays free of content.
+ *
+ * `cost` is what the player pays, `gain` is what they receive. Keys map onto
+ * colony resources (`scrap`, `food`, `water`, `energy`), the surface haul
+ * (`salvage`, `arcTech`), and two special effects (`schematic`, `healAll`).
+ */
+export function traderOffersFor(specialty) {
+  switch (specialty) {
+    case "salvage":
+      return [
+        { id: "sal-bulk",  label: "Bulk salvage",      desc: "25 salvage for 70 scrap",      cost: { scrap: 70 },   gain: { salvage: 25 } },
+        { id: "sal-swap",  label: "Salvage for parts", desc: "12 salvage for 30 scrap",      cost: { scrap: 30 },   gain: { salvage: 12 } },
+      ];
+    case "arcTech":
+      return [
+        { id: "arc-buy",   label: "Arc components",    desc: "3 Arc Tech for 90 scrap",      cost: { scrap: 90 },   gain: { arcTech: 3 } },
+        { id: "arc-trade", label: "Tech for salvage",  desc: "2 Arc Tech for 20 salvage",    cost: { salvage: 20 }, gain: { arcTech: 2 } },
+      ];
+    case "medicine":
+      return [
+        { id: "med-all",   label: "Field treatment",   desc: "Heal every injured colonist for 60 scrap", cost: { scrap: 60 }, gain: { healAll: true } },
+        { id: "med-morale",label: "Comfort supplies",  desc: "+12 morale for 40 scrap",      cost: { scrap: 40 },   gain: { morale: 12 } },
+      ];
+    case "schematics":
+      return [
+        { id: "sch-tech",  label: "A schematic",       desc: "1 schematic for 4 Arc Tech",   cost: { arcTech: 4 },  gain: { schematic: true } },
+        { id: "sch-scrap", label: "A schematic",       desc: "1 schematic for 120 scrap",    cost: { scrap: 120 },  gain: { schematic: true } },
+      ];
+    case "scrap":
+    default:
+      return [
+        { id: "scr-sal",   label: "Scrap for salvage", desc: "80 scrap for 15 salvage",      cost: { salvage: 15 }, gain: { scrap: 80 } },
+        { id: "scr-food",  label: "Emergency rations", desc: "40 food and 40 water for 50 scrap", cost: { scrap: 50 }, gain: { food: 40, water: 40 } },
+      ];
+  }
+}
+
+/** Can the player currently pay for this offer? Pure; used by UI and handler. */
+export function canAffordOffer(offer, { res, surfaceHaul }) {
+  for (const [k, v] of Object.entries(offer.cost)) {
+    if (k === "salvage" || k === "arcTech") { if ((surfaceHaul?.[k] ?? 0) < v) return false; }
+    else if ((res?.[k] ?? 0) < v) return false;
+  }
+  return true;
+}
+
 // ─── Resolve & Talents (meta-progression) ────────────────────────────────────
 // Surviving a raid used to pay nothing. The raid economy fix removed a broken
 // reward that paid 685-1289 scrap win *or lose*, which was right, but it left a
@@ -776,6 +835,18 @@ export function deprivationStage(deprivedTicks, collapseTicksBonus = 0) {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 export const DRAIN_PER_COL = { food: 0.4, water: 0.4, energy: 0.2 };
 export function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+
+/**
+ * Resource amounts, cleaned of binary-float noise.
+ *
+ * Drains are fractional (0.4 food per colonist) and accumulate every tick, so
+ * stores drifted into values like `57.599999999999994` and `210.20000000000002`.
+ * Only the minigame's *display* was ever rounded, which meant the error was
+ * still in the real numbers and surfaced in any new UI that showed them.
+ * Two decimals is far finer than any drain or production rate, so this changes
+ * no behaviour — it only stops the tails accumulating.
+ */
+export function roundRes(v) { return Math.round(v * 100) / 100; }
 export const EMPTY_STAT_BREAKDOWN = { plus: [], minus: [], net: 0 };
 
 // Save safety helper: disable save/load actions during volatile raid phases

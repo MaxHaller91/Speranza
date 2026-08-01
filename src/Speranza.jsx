@@ -30,6 +30,8 @@ import {
   getHeatState, INJURY_TICKS_BASE, HEAL_RATE_NURSE,
   RAID_SIZES, RAID_SIZE_ORDER, RAID_LAUNCH_CHANCE,
   DIFFICULTIES, DIFFICULTY_ORDER, DEFAULT_DIFFICULTY,
+  roundRes,
+  TRADER_CHECK_EVERY, TRADER_CHANCE, TRADER_STAY_TICKS, traderOffersFor, canAffordOffer,
   TALENTS, TALENT_ORDER, talentEffects, resolveEarned,
   T2_TECHS, TRAITS, TRAIT_KEYS,
   makeColonist, ROOM_TYPES, EXCAVATION_DEFS,
@@ -53,6 +55,7 @@ import RaidBanner      from './components/RaidBanner.jsx';
 import GameOverModal   from './components/GameOverModal.jsx';
 import StartScreen     from './components/StartScreen.jsx';
 import TalentScreen    from './components/TalentScreen.jsx';
+import TraderModal     from './components/TraderModal.jsx';
 import DilemmaModal    from './components/DilemmaModal.jsx';
 import TraitPicker     from './components/TraitPicker.jsx';
 import BuildMenu       from './components/BuildMenu.jsx';
@@ -148,6 +151,10 @@ export default function Speranza() {
   const [peakPopulation,        setPeakPopulation]        = useState(3);
   const [activeDilemma,         setActiveDilemma]         = useState(null);
   const [dilemmaTimer,          setDilemmaTimer]          = useState(0);
+  // Trader visits. activeTrader: null | { name, line, offers, ticksLeft }
+  const [activeTrader,          setActiveTrader]          = useState(null);
+  const [traderTimer,           setTraderTimer]           = useState(0);
+  const [tradersVisited,        setTradersVisited]        = useState(0);
   const [firedDilemmas,         setFiredDilemmas]         = useState([]);
   // Help / quickstart modal
   const HELP_SEEN_KEY = "speranza_help_seen";
@@ -200,6 +207,7 @@ export default function Speranza() {
     : gameOver                                  ? "gameOver"
     : colonists.some(c => c.pendingTraitPick)   ? "traitPicker"
     : activeDilemma                             ? "dilemma"
+    : activeTrader                              ? "trader"
     : milestoneToast                            ? "milestone"
     : helpOpen                                  ? "help"
     : surfaceDefenseActive                      ? "surfaceDefense"
@@ -232,6 +240,9 @@ export default function Speranza() {
   const surfaceConditionTimerRef = useRef(0);
   const surfaceRotateAtRef       = useRef(80 + Math.floor(Math.random() * 41));
   const dilemmaTimerRef          = useRef(0);
+  const activeTraderRef          = useRef(null);
+  const traderTimerRef           = useRef(0);
+  const tradersVisitedRef        = useRef(0);
   const activeDilemmaRef         = useRef(null);
   const tickHistoryRef = useRef([]);
   const eventTraceRef = useRef([]);
@@ -310,6 +321,9 @@ export default function Speranza() {
   useEffect(() => { activeDilemmaRef.current    = activeDilemma;    }, [activeDilemma]);
   useEffect(() => { surfaceConditionTimerRef.current = surfaceConditionTimer; }, [surfaceConditionTimer]);
   useEffect(() => { dilemmaTimerRef.current     = dilemmaTimer;     }, [dilemmaTimer]);
+  useEffect(() => { activeTraderRef.current     = activeTrader;     }, [activeTrader]);
+  useEffect(() => { traderTimerRef.current      = traderTimer;      }, [traderTimer]);
+  useEffect(() => { tradersVisitedRef.current   = tradersVisited;   }, [tradersVisited]);
   useEffect(() => { heatSuppressedTicksRef.current = heatSuppressedTicks; }, [heatSuppressedTicks]);
   // Raid cooldown — starts at 48 (one in-game day) to block raids on fresh game
   const raidCooldownTicksRef = useRef(RAID_GRACE_TICKS);
@@ -435,6 +449,8 @@ export default function Speranza() {
       heatSuppressedTicks,
       deprivedTicks,
       dilemmaTimer,
+      traderTimer,
+      tradersVisited,
       activeDilemma,
     };
 
@@ -468,6 +484,9 @@ export default function Speranza() {
       heatSuppressedTicks: s.heatSuppressedTicks,
       deprivedTicks: s.deprivedTicks,
       dilemmaTimer: s.dilemmaTimer,
+      traderTimer: s.traderTimer,
+      tradersVisited: s.tradersVisited,
+      activeTrader: null,  // a visitor does not survive a reload
       activeDilemma: s.activeDilemma,
       activeRaid: null,
       raidWindow: null,
@@ -483,6 +502,7 @@ export default function Speranza() {
     surfaceCondition, surfaceConditionTimer, peakPopulation,
     firedMilestones, firedDilemmas, recentDilemmaOutcomes,
     historyLog, heatSuppressedTicks, deprivedTicks, dilemmaTimer, activeDilemma,
+    traderTimer, tradersVisited,
   ]);
 
   const buildSavePayload = useCallback((source = null) => ({
@@ -826,6 +846,9 @@ export default function Speranza() {
       setDeprivedTicks(state.deprivedTicks ?? 0);
       deprivedTicksRef.current = state.deprivedTicks ?? 0;
       setDilemmaTimer(state.dilemmaTimer ?? 0);
+      setTraderTimer(state.traderTimer ?? 0);
+      setTradersVisited(state.tradersVisited ?? 0);
+      setActiveTrader(null); activeTraderRef.current = null;
       setActiveDilemma(state.activeDilemma ?? null);
 
       // v1 normalization safety: never restore live raid/minigame runtime
@@ -1148,6 +1171,13 @@ export default function Speranza() {
             if (val > 0) next[r] = clamp(next[r] + val * 0.1, 0, MAX_RES);
             if (val > 0 && (r === "energy" || r === "food" || r === "water")) pushReason(r, val * 0.1, "High-morale efficiency");
           }
+        }
+
+        // Strip float noise once, at the end, where every drain and production
+        // has already been applied. Doing it here rather than at each display
+        // site means the stored values are clean too.
+        for (const r of Object.keys(next)) {
+          if (typeof next[r] === "number") next[r] = roundRes(next[r]);
         }
 
         setNetFlow(flow);
@@ -1538,6 +1568,8 @@ export default function Speranza() {
             day:                  Math.floor(tickRef.current / 48) + 1,
             morale:               moraleRef.current,
             schematics:           surfaceHaulRef.current.schematics.length,
+          tradersVisited:       tradersVisitedRef.current,
+            tradersVisited:       tradersVisitedRef.current,
             t3Built:              0,
           });
         } else {
@@ -1776,6 +1808,7 @@ export default function Speranza() {
           day:                  Math.floor(next / 48) + 1,
           morale:               moraleRef.current,
           schematics:           surfaceHaulRef.current.schematics.length,
+          tradersVisited:       tradersVisitedRef.current,
           t3Built:              0,
         });
         return next;
@@ -1805,6 +1838,39 @@ export default function Speranza() {
         } else {
           surfaceConditionTimerRef.current = nextTimer;
           setSurfaceConditionTimer(nextTimer);
+        }
+
+        // Trader arrival — rolled in the tick body, never in an updater.
+        // Requires a working Radio Tower: without comms nobody knows you are
+        // here. That gives the Radio Tower a second job besides raid ID.
+        if (activeTraderRef.current) {
+          const left = activeTraderRef.current.ticksLeft - 1;
+          if (left <= 0) {
+            addLog(`⚖ ${activeTraderRef.current.name} moved on.`);
+            setActiveTrader(null); activeTraderRef.current = null;
+          } else {
+            const upd = { ...activeTraderRef.current, ticksLeft: left };
+            setActiveTrader(upd); activeTraderRef.current = upd;
+          }
+        } else {
+          const nextTt = traderTimerRef.current + 1;
+          // Same rule as the header's `radioTowerOnline`, computed from refs
+          // because the derived value is not in scope inside the tick loop.
+          const commsUp = gridRef.current.flat().some(c => c.type === "radioTower")
+            && !surfaceConditionRef.current.effects.radioOffline;
+          if (nextTt >= TRADER_CHECK_EVERY && commsUp) {
+            if (Math.random() < TRADER_CHANCE) {
+              const t = TRADERS[Math.floor(Math.random() * TRADERS.length)];
+              const arrival = { name: t.name, line: t.line, specialty: t.specialty,
+                                offers: traderOffersFor(t.specialty), ticksLeft: TRADER_STAY_TICKS };
+              setActiveTrader(arrival); activeTraderRef.current = arrival;
+              addLog(`⚖ ${t.name} has arrived at the hatch.`);
+              playRecruit();
+            }
+            traderTimerRef.current = 0; setTraderTimer(0);
+          } else {
+            traderTimerRef.current = nextTt; setTraderTimer(nextTt);
+          }
         }
 
         // Dilemma event check — every 50 ticks, 40% chance if none active
@@ -1940,9 +2006,14 @@ export default function Speranza() {
     addLog(`⛏ Excavation of ${def.label} begun. ${actualCount} worker(s) assigned.`);
   };
 
-  const handleBuild = (type) => {
-    if (!selected) return;
-    const { r, c } = selected;
+  const handleBuild = (type, atCell = null) => {
+    // The UI builds into the selected cell; the dev hook passes one explicitly.
+    // It used to setSelected() then fire handleBuild from a setTimeout, but that
+    // callback captured the render where `selected` was still null, so every
+    // scripted build silently no-opped.
+    const target = atCell ?? selected;
+    if (!target) return;
+    const { r, c } = target;
     if (!unlockedRows.includes(r)) { addLog("⚠ This level is not excavated yet"); return; }
     const def = ROOM_TYPES[type];
     // Check all costs — salvage/arcTech come from surfaceHaul
@@ -2405,6 +2476,9 @@ ${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelte
     deprivedTicksRef.current = 0;
     surfaceConditionTimerRef.current = 0;
     dilemmaTimerRef.current = 0;
+    setActiveTrader(null); activeTraderRef.current = null;
+    setTraderTimer(0); traderTimerRef.current = 0;
+    setTradersVisited(0); tradersVisitedRef.current = 0;
     activeDilemmaRef.current = null;
     raidCooldownTicksRef.current = Math.round(RAID_GRACE_TICKS * nextDiffConfig.graceMult);
     raidSuppressedThisRaidRef.current = 0;
@@ -2414,6 +2488,60 @@ ${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelte
     setSurfaceDefenseActive(false);
     setPendingRaidSize(null);
     setPendingWealthBracket(0);
+  };
+
+  const handleTraderAccept = (offer) => {
+    const t = activeTraderRef.current;
+    if (!t || !canAffordOffer(offer, { res, surfaceHaul })) return;
+
+    // Pay. Colony resources and the surface haul are separate stores.
+    const resCost  = {}, haulCost = {};
+    for (const [k, v] of Object.entries(offer.cost)) {
+      if (k === "salvage" || k === "arcTech") haulCost[k] = v; else resCost[k] = v;
+    }
+    if (Object.keys(resCost).length)
+      setRes(prev => { const n = { ...prev };
+        for (const [k, v] of Object.entries(resCost)) n[k] = roundRes(Math.max(0, n[k] - v));
+        return n; });
+    if (Object.keys(haulCost).length)
+      setSurfaceHaul(prev => { const n = { ...prev };
+        for (const [k, v] of Object.entries(haulCost)) n[k] = Math.max(0, (n[k] ?? 0) - v);
+        return n; });
+
+    // Receive.
+    const g = offer.gain;
+    const resGain = {}, haulGain = {};
+    for (const [k, v] of Object.entries(g)) {
+      if (k === "salvage" || k === "arcTech") haulGain[k] = v;
+      else if (["scrap","food","water","energy"].includes(k)) resGain[k] = v;
+    }
+    if (Object.keys(resGain).length)
+      setRes(prev => { const n = { ...prev };
+        for (const [k, v] of Object.entries(resGain)) n[k] = roundRes(clamp(n[k] + v, 0, MAX_RES));
+        return n; });
+    if (Object.keys(haulGain).length)
+      setSurfaceHaul(prev => { const n = { ...prev };
+        for (const [k, v] of Object.entries(haulGain)) n[k] = (n[k] ?? 0) + v;
+        return n; });
+    if (g.schematic)
+      setSurfaceHaul(prev => ({ ...prev,
+        schematics: [...prev.schematics, `${t.name}'s schematic`] }));
+    if (g.healAll)
+      setColonists(prev => prev.map(c => c.status === "injured"
+        ? { ...c, status: "idle", injuryTicks: 0, assignedRoom: null } : c));
+    if (g.morale) changeMoraleRef.current(g.morale, `traded with ${t.name}`);
+
+    // Side effects live out here, never inside the updaters above.
+    addLog(`⚖ Traded with ${t.name}: ${offer.desc}.`);
+    playSuccess();
+    setTradersVisited(prev => { const n = prev + 1; tradersVisitedRef.current = n; return n; });
+    setActiveTrader(null); activeTraderRef.current = null;
+  };
+
+  const handleTraderDecline = () => {
+    const t = activeTraderRef.current;
+    if (t) addLog(`⚖ Sent ${t.name} away.`);
+    setActiveTrader(null); activeTraderRef.current = null;
   };
 
   const handleUnlockTalent = (key) => {
@@ -2507,12 +2635,13 @@ ${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelte
           // This is the SAME value the game runs on, not a second copy of the
           // rules — the two used to be able to drift apart.
           activeDilemma, milestoneToast, helpOpen, buildMenu, selected,
+          activeTrader, tradersVisited, surfaceHaul,
           speed, manualPause, resolve, talents, effects,
           pauseCause: pauseReason,
     }),
       // Actions that bypass UI state, so a harness never has to fake clicks.
       setTimescale,
-      build: (r, c, type) => { setSelected({ r, c }); setTimeout(() => handleBuild(type), 0); },
+      build: (r, c, type) => handleBuild(type, { r, c }),
       assign: handleAssign,
       recruit: handleRecruit,
       launch: handleLaunchExpedition,
@@ -2522,13 +2651,19 @@ ${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelte
       // Sandbox helper for long soak tests: keeps a colony alive so the raid,
       // expedition, milestone and save systems can be exercised over many days
       // without the test also having to play well. Never use it to judge balance.
-      sandboxTopUp: (floor = 120) => setRes(prev => ({
-        ...prev,
-        energy: Math.max(prev.energy, floor),
-        food:   Math.max(prev.food,   floor),
-        water:  Math.max(prev.water,  floor),
-        scrap:  Math.max(prev.scrap,  floor),
-      })),
+      sandboxTopUp: (floor = 120) => setRes(prev => {
+        // Clamp to MAX_RES: an unclamped floor above the cap left every
+        // resource pinned at the ceiling, so a test could not distinguish a
+        // real gain from the clamp.
+        const f = Math.min(floor, MAX_RES);
+        return {
+          ...prev,
+          energy: Math.max(prev.energy, f),
+          food:   Math.max(prev.food,   f),
+          water:  Math.max(prev.water,  f),
+          scrap:  Math.max(prev.scrap,  f),
+        };
+      }),
       // Morale, not supply, is what kills an unmanaged colony: with resources
       // pinned at 150 a fresh colony still collapsed to -100 morale and died on
       // day 3. A soak test needs to survive to day 25 to exercise raids,
@@ -2537,6 +2672,19 @@ ${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelte
       sandboxMorale: (floor = 40) => setMorale(prev => Math.max(prev, floor)),
       unlockTalent: handleUnlockTalent,
       grantResolve: (n = 20) => setResolve(prev => prev + n),
+      // Sandbox: skip the RP cost so a test can reach tech-gated content
+      // (Radio Tower, and therefore traders) without grinding research.
+      sandboxUnlockTech: (key) => { if (T2_TECHS[key]) setUnlockedTechs(prev => prev.includes(key) ? prev : [...prev, key]); },
+      // Summon a trader on demand. Arrival is a 45% roll every 60 ticks, so
+      // waiting on RNG made trade behaviour tedious to test.
+      sandboxTrader: (specialty) => {
+        const t = specialty
+          ? (TRADERS.find(x => x.specialty === specialty) ?? TRADERS[0])
+          : TRADERS[Math.floor(Math.random() * TRADERS.length)];
+        const arrival = { name: t.name, line: t.line, specialty: t.specialty,
+                          offers: traderOffersFor(t.specialty), ticksLeft: TRADER_STAY_TICKS };
+        setActiveTrader(arrival); activeTraderRef.current = arrival;
+      },
   };
 
   useEffect(() => {
@@ -2557,6 +2705,8 @@ ${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelte
       sandboxMorale: call("sandboxMorale"),
       unlockTalent:  call("unlockTalent"),
       grantResolve:  call("grantResolve"),
+      sandboxUnlockTech: call("sandboxUnlockTech"),
+      sandboxTrader:     call("sandboxTrader"),
     };
   }, []);
 
@@ -2628,6 +2778,14 @@ ${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelte
       <TraitPicker colonists={colonists} onPickTrait={handlePickTrait} />
 
       {!runStarted && <StartScreen onBegin={handleBegin} />}
+
+      <TraderModal
+        trader={activeTrader}
+        res={res}
+        surfaceHaul={surfaceHaul}
+        onAccept={handleTraderAccept}
+        onDecline={handleTraderDecline}
+      />
 
       {talentScreenOpen && (
         <TalentScreen

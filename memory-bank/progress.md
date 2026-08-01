@@ -321,6 +321,70 @@ original 10x) when the last overlay closed. That is exactly the "one overlay
 resumes beneath another" failure `plans/expedition-decisions-v2.md` line 370
 warned about, now structurally impossible.
 
+## Floats fixed at source + Traders wired (step 2a) - 2026-07-31 (opus-5)
+
+### Floats
+
+`roundRes()` in `gameData.js`, applied once at the end of the tick's resource
+updater where every drain and production has landed. Drains are fractional (0.4
+food per colonist) so stores drifted to `57.599999999999994`; only the minigame's
+*display* had been rounded, leaving the error in the stored values. Two decimals
+is far finer than any rate, so nothing changes but the tails. Verified: stores
+stay clean after minutes of play.
+
+### Traders (roadmap step 2a)
+
+`TRADERS` in `speranza-lore.js` was fully authored and imported by nothing, with
+a dormant `tradersVisited` milestone waiting on it. Now live:
+
+- Arrival rolled in the tick body (never in an updater): every 60 ticks, 45%
+  chance, and **only with a working Radio Tower** - so that building earns a
+  second purpose beyond raid identification. Visitors stay 30 ticks.
+- `traderOffersFor(specialty)` and `canAffordOffer()` are pure, in `gameData.js`.
+  Two offers per specialty across salvage / arcTech / medicine / schematics /
+  scrap, paying from either colony resources or the surface haul.
+- `TraderModal.jsx` is props-only, follows `DilemmaModal`, and does not touch
+  the clock: `activeTrader` is a pause reason.
+- Full state discipline: ref mirror, save payload, load (a visitor does not
+  survive a reload), and restart reset.
+
+Verified with the clock frozen so production could not confound the deltas:
+scrap -70 / salvage +25, salvage -20 / arcTech +2, and the schematic offer
+correctly refused at 2 Arc Tech when it costs 4. `tradersVisited` counted 3
+successful trades and did not increment on the refusal.
+
+### Four dev-hook bugs found while testing, all fixed
+
+These would each have broken future scripted playtests:
+
+1. **`build()` never worked.** It did `setSelected({r,c})` then fired
+   `handleBuild` from a `setTimeout`, but that callback captured the render
+   where `selected` was still `null`, so every scripted build silently
+   no-opped. `handleBuild(type, atCell)` now takes the cell explicitly.
+2. **`sandboxTopUp` ignored `MAX_RES`.** A floor above the 300 cap left every
+   resource pinned at the ceiling, so a test could not tell a real gain from the
+   clamp - it masked a trade result completely before being spotted.
+3. **No way to reach tech-gated content.** Added `sandboxUnlockTech`, needed to
+   build a Radio Tower and therefore to see a trader at all.
+4. **Arrival is a 45% roll every 60 ticks**, which made trading tedious to test.
+   Added `sandboxTrader(specialty)` to summon one.
+
+Also exposed `activeTrader`, `tradersVisited` and `surfaceHaul` on the hook
+snapshot - their absence made an early check report a false negative.
+
+### Two environment notes that cost time
+
+- **Background tabs throttle `setInterval` to ~1/minute.** The game clock ran at
+  1 tick per minute until the tab was fronted, which looked exactly like a hang.
+  Front the tab before timing anything.
+- **Adding a method to the dev hook needs a full page reload**, not HMR, because
+  the hook object is now assigned once for stable identity.
+
+### Still unwired
+
+`DIRECTIVES`, `ARTIFACT_TEMPLATES` / `ARTIFACT_ITEMS`, and the `COMMANDER_*`
+sets remain imported-but-unused - steps 2b, 2c, 2d.
+
 ## Known Issues / Limitations ⚠️
 
 ### Save System Validation Pending
