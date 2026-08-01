@@ -76,7 +76,7 @@ an interactive harness or a human playtest session.
 
 9b (2-D tower-defense placement) stays gated behind that day-25 playtest.
 
-- [ ] **Step 3** — UI scale pass for Steam · `03-ui-scale-pass.md`
+- [ ] **Step 3** — UI scale pass for Steam · `03-ui-scale-pass.md` — CLAIMED interactive-session 2026-08-01
 - [ ] **Step 4** — Game-over as an obituary · `04-game-over-obituary.md`
 - [ ] **Step 5** — Morale visible as behaviour · `05-morale-as-behaviour.md`
 - [ ] **Step 7** — Variable room sizes (silhouette) · `07-variable-room-sizes.md`
