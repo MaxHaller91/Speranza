@@ -53,6 +53,7 @@ import {
   fs, setUiScale, UI_SCALES, DEFAULT_UI_SCALE, UI_SCALE_KEY,
   shouldArrive, ARRIVAL_CHECK_EVERY, POP_CAP_BASE, POP_CAP_PER_BARRACKS,
   LABOR_GROUPS, LABOR_GROUP_ORDER, allocateLabor, groupCapacity,
+  ROOM_MAX_LEVEL, roomOutputMult, roomUpgradeCost, barracksCapacity,
 } from "./gameData.js";
 import SurfaceDefense from './surface_defense';
 import SkyBackground   from './components/SkyBackground.jsx';
@@ -305,7 +306,9 @@ export default function Speranza() {
 
   const calcPopCap = (g) => {
     let cap = POP_CAP_BASE;
-    g.forEach(row => row.forEach(cell => { if (cell.type === "barracks") cap += POP_CAP_PER_BARRACKS; }));
+    g.forEach(row => row.forEach(cell => {
+      if (cell.type === "barracks") cap += barracksCapacity(cell.level);
+    }));
     return cap;
   };
   const popCap = calcPopCap(grid);
@@ -1191,7 +1194,8 @@ export default function Speranza() {
             if (r === "energy" || r === "food" || r === "water") pushReason(r, -used, `${def.label} upkeep`);
           }
           for (const [r, amt] of Object.entries(def.produces)) {
-            const made = amt * cell.workers * adj.outputMult * directiveFxRef.current.productionMult;
+            const made = amt * cell.workers * adj.outputMult
+              * directiveFxRef.current.productionMult * roomOutputMult(cell.level);
             next[r] = clamp(next[r] + made, 0, MAX_RES);
             flow[r] += made;
             if (r === "energy" || r === "food" || r === "water") pushReason(r, made, `${def.label} output`);
@@ -2245,6 +2249,26 @@ ${art.text}`, "success", { key: `artifact-${art.id}` });
     }
   };
 
+  // Upgrading raises output per worker in the same cell. With a 4x7 grid, this
+  // is how a growing colony is fed without sprawling -- you invest in a cell you
+  // already hold instead of claiming one you do not have.
+  const handleUpgradeRoom = (r, c) => {
+    const cell = grid[r][c];
+    if (!cell?.type) return;
+    const level = cell.level ?? 1;
+    const cost = roomUpgradeCost(cell.type, level);
+    if (cost === null) { addLog(`⚠ ${ROOM_TYPES[cell.type].label} is already at maximum level`); return; }
+    if (res.scrap < cost) { addLog(`❌ Need ${cost} scrap to upgrade ${ROOM_TYPES[cell.type].label}`); return; }
+    setRes(prev => ({ ...prev, scrap: roundRes(prev.scrap - cost) }));
+    setGrid(prev => {
+      const next = prev.map(row => row.map(x => ({ ...x })));
+      next[r][c] = { ...next[r][c], level: level + 1 };
+      return next;
+    });
+    addLog(`⬆ ${ROOM_TYPES[cell.type].label} upgraded to level ${level + 1}. (-${cost} scrap)`);
+    playBuild();
+  };
+
   const handleDemolish = (r, c) => {
     const cell = grid[r][c];
     if (!cell.type) return;
@@ -3153,6 +3177,7 @@ ${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelte
           onSoundAlarm={handleSoundAlarm}
           onRepair={handleRepair}
           onDemolish={handleDemolish}
+          onUpgradeRoom={handleUpgradeRoom}
           onUnlockTech={handleUnlockTech}
           onCloseRoom={() => { setSelected(null); setBuildMenu(false); }}
         />

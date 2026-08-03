@@ -1068,6 +1068,46 @@ export function postStatusFor(roomType) {
   return roomType === "sentryPost" ? "onSentry" : "working";
 }
 
+// ─── Room upgrades ───────────────────────────────────────────────────────────
+// The grid is 4x7 and excavation-gated, so a growing colony cannot simply
+// sprawl. Upgrading turns that limit into the puzzle: you invest in cells you
+// already hold rather than claiming new ones, and a well-placed upgraded room
+// beats two badly-placed cheap ones.
+//
+// Upgrades raise output per worker, NOT worker capacity. Raising capacity would
+// just demand more people, which is the pressure we are already applying from
+// the other side; raising output is what lets a fixed footprint feed a bigger
+// population.
+//
+// Barracks are the exception -- their "output" is housing, so their level
+// multiplies the population cap. That is what stops housing eating the grid:
+// at level 3 one cell sleeps nine people instead of three.
+export const ROOM_MAX_LEVEL = 3;
+
+/** Output multiplier for a room at this level. L1 1.0, L2 1.6, L3 2.2. */
+export function roomOutputMult(level = 1) {
+  return 1 + 0.6 * (Math.max(1, Math.min(ROOM_MAX_LEVEL, level)) - 1);
+}
+
+/**
+ * Scrap to go from `level` to `level + 1`, or null if already maxed.
+ *
+ * Priced at twice the room's build cost per step, so upgrading is deliberately
+ * more expensive than putting down another copy. You pay the premium to save a
+ * cell, which is only worth it once cells are the scarce thing.
+ */
+export function roomUpgradeCost(roomType, level = 1) {
+  if (level >= ROOM_MAX_LEVEL) return null;
+  const base = ROOM_TYPES[roomType]?.cost?.scrap ?? 0;
+  // Workshop is free to build; give it a floor so its upgrades still cost.
+  return Math.max(20, Math.round(base * 2 * level));
+}
+
+/** Housing a single Barracks provides at this level. */
+export function barracksCapacity(level = 1) {
+  return POP_CAP_PER_BARRACKS * Math.max(1, Math.min(ROOM_MAX_LEVEL, level));
+}
+
 // ─── Labour groups ───────────────────────────────────────────────────────────
 // The player used to assign every colonist to a specific cell by clicking small
 // circles. A playtester lost a colony to it: "I wasn't able to click the tiny

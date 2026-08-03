@@ -1,6 +1,7 @@
 // SidePanel.jsx — right panel: log, colony effects, colonist detail, room panel, memorial
 // Props: (see bottom of file for full prop list)
-import { ROOM_TYPES, EXPEDITION_TYPES, T2_TECHS, TRAITS, STATUS_COLOR, STATUS_LABEL, tickToDayHour, fs,} from "../gameData.js";
+import { ROOM_TYPES, EXPEDITION_TYPES, T2_TECHS, TRAITS, STATUS_COLOR, STATUS_LABEL, tickToDayHour, fs,
+  roomUpgradeCost, roomOutputMult, barracksCapacity } from "../gameData.js";
 import { SURFACE_LOCATIONS } from "../../speranza-lore.js";
 
 export const CAUSE_LABEL = {
@@ -55,7 +56,7 @@ export default function SidePanel({
   // callbacks
   onCloseColonist, onAssign, onSetExpedDuration, onLaunchExpedition,
   onSetExpedLocation, onToggleCrew,
-  onBackToWork, onSoundAlarm, onRepair, onDemolish, onUnlockTech,
+  onBackToWork, onSoundAlarm, onRepair, onDemolish, onUnlockTech, onUpgradeRoom,
   onCloseRoom,
 }) {
   const selCol = colonists.find(c => c.id === selectedColonist);
@@ -444,6 +445,29 @@ export default function SidePanel({
             {selCell.damaged && (
               <button onClick={() => onRepair(selected.r, selected.c)} style={{ flex: 1, background: "#001a0a", border: "1px solid #20a040", borderRadius: 4, color: "#4ca060", padding: 4, cursor: "pointer", fontSize: fs(9) }}>🔧 REPAIR (20 scrap)</button>
             )}
+            {(() => {
+              const cell = selCell;
+              const level = cell.level ?? 1;
+              const cost = roomUpgradeCost(cell.type, level);
+              const afford = cost !== null && res.scrap >= cost;
+              return (
+                <button
+                  onClick={() => afford && onUpgradeRoom(selected.r, selected.c)}
+                  disabled={cost === null || !afford}
+                  title={cost === null
+                    ? "Already at maximum level"
+                    : cell.type === "barracks"
+                      // Barracks have no `produces`; their output is housing, so quoting
+                      // an output multiplier here would simply be untrue.
+                      ? `Level ${level} → ${level + 1}: houses ${barracksCapacity(level + 1)}, up from ${barracksCapacity(level)}`
+                      : `Level ${level} → ${level + 1}: output x${roomOutputMult(level + 1).toFixed(1)}`}
+                  style={{ flex: 1, background: afford ? "#0a1420" : "#0a0c12",
+                    border: `1px solid ${afford ? "#3a7ab0" : "#1a2028"}`, borderRadius: 4,
+                    color: afford ? "#6ab3e0" : "#3a4450", padding: 4,
+                    cursor: afford ? "pointer" : "not-allowed", fontSize: fs(9) }}
+                >{cost === null ? `\u2b06 MAX (L${level})` : `\u2b06 L${level + 1} (${cost})`}</button>
+              );
+            })()}
             <button onClick={() => onDemolish(selected.r, selected.c)} style={{ flex: 1, background: "#1a0000", border: "1px solid #5a2020", borderRadius: 4, color: "#844", padding: 4, cursor: "pointer", fontSize: fs(9) }}>DEMOLISH</button>
           </div>
         </div>
