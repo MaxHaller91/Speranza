@@ -10,6 +10,7 @@ import hydroponicsSprite from "./Assets/Buildings/Hydroponics.png";
 import barracksSprite   from "./Assets/Buildings/Barracks.png";
 import armorySprite     from "./Assets/Buildings/Armory.png";
 import hospitalSprite   from "./Assets/Buildings/Hospital.png";
+import researchLabSprite from "./Assets/Buildings/Research Lab.png";
 import earthTexture     from "./Assets/Buildings/Earth Texture.png";
 
 export { earthTexture };
@@ -41,9 +42,13 @@ export const HEAT_SENTRY_MITIGATION_CAP = 0.60; // never fully suppressed
 // Raids roll every RAID_ROLL_EVERY ticks instead of only at midnight. Six
 // checks a day means the cadence responds to heat instead of being one binary
 // coin-flip per day that could leave 20 real minutes between raids.
-export const RAID_ROLL_EVERY       = 8;
-export const HEAT_RAID_PROB_BASE   = 0.05;  // ~1 raid / 3.3 days when unnoticed
-export const HEAT_RAID_PROB_SCALE  = 0.16;  // ~1 raid / 0.8 days when MARKED
+// Rarer and much harder. At the old 8-tick roll with 0.05+0.16, max heat gave
+// six rolls a day at 0.21 -- about a 76% chance of a raid EVERY day, which the
+// playtest confirmed (raids on days 3,4,6,6,8,9) and which made each one a
+// formality. Two rolls a day at 0.04+0.11 is roughly one raid every 3-4 days.
+export const RAID_ROLL_EVERY       = 24;
+export const HEAT_RAID_PROB_BASE   = 0.04;  // 2 rolls/day -> ~1 raid / 13 days unnoticed
+export const HEAT_RAID_PROB_SCALE  = 0.11;  // at max heat 0.15/roll -> ~1 raid / 3.6 days
 
 // Minimum ticks between raids, and the grace period on a fresh colony.
 // Weathering a bigger assault buys proportionally more quiet.
@@ -462,7 +467,7 @@ export const ROOM_TYPES = {
     special: "hospital",
   },
   researchLab: {
-    label: "Research Lab",   icon: "🔬", color: "#00e5ff", bg: "#001a1f", border: "#00e5ff",
+    label: "Research Lab",   icon: "🔬", sprite: researchLabSprite, color: "#00e5ff", bg: "#001a1f", border: "#00e5ff",
     tag: "industry",
     cost: { scrap: 45 },    produces: { rp: 1 }, consumes: { energy: 1 }, cap: 2,
     desc: "Generates research points to unlock T2 technologies. Assign researchers to accelerate progress.",
@@ -919,6 +924,37 @@ export function getUiScale() { return _uiScale; }
 
 /** Scale a design-time pixel value. Round to 0.1px so text stays crisp. */
 export function fs(px) { return Math.round(px * _uiScale * 10) / 10; }
+
+// --- Population growth -------------------------------------------------------
+// This is the game's pressure. Everything else is texture.
+//
+// The measured failure was that nothing scaled: one Hydroponics worker produces
+// 2 food/tick, a colonist eats 0.4, so one worker feeds exactly 5 -- and the pop
+// cap with a single Barracks was also 5. The ratios were never wrong; the cap
+// pinned the colony at the trivial end so they were never exercised. At 15
+// people the same numbers demand 3 hydro workers, 3 water, 3 power: nine of your
+// fifteen on life support, before a single specialist.
+//
+// So survivors arrive on their own, gated on having somewhere to put them and
+// food to spare. Growth is opt-in through building Barracks, self-regulating
+// (fall behind and it pauses), and it raises heat via HEAT_GAIN_PER_ROOM, so
+// success is what makes the Arc notice you.
+export const ARRIVAL_CHECK_EVERY   = 72;   // ticks; 1.5 days at 48/day
+export const ARRIVAL_FOOD_DAYS     = 1;    // need this much buffer to accept anyone
+export const POP_CAP_BASE          = 3;
+export const POP_CAP_PER_BARRACKS  = 3;    // was 2: at 2, pop 18 costs 8 of 28 cells
+
+/**
+ * Should a survivor turn up this tick? Pure so the rate can be tuned and tested
+ * without running a colony. Deterministic on purpose -- a probability would be
+ * harder to reason about while balancing.
+ */
+export function shouldArrive({ ticksSinceArrival, population, popCap, food, foodDrainPerTick }) {
+  if (ticksSinceArrival < ARRIVAL_CHECK_EVERY) return false;
+  if (population >= popCap) return false;                    // nowhere to sleep
+  const buffer = foodDrainPerTick * 48 * ARRIVAL_FOOD_DAYS;  // 48 ticks = 1 day
+  return food >= buffer;
+}
 
 export const DRAIN_PER_COL = { food: 0.4, water: 0.4, energy: 0.2 };
 export function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }

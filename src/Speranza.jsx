@@ -51,6 +51,7 @@ import {
   occupiedSeats, reclaimPost, advanceExpeditions,
   calcAdjacency, calcAdjacencyMorale,
   fs, setUiScale, UI_SCALES, DEFAULT_UI_SCALE, UI_SCALE_KEY,
+  shouldArrive, ARRIVAL_CHECK_EVERY, POP_CAP_BASE, POP_CAP_PER_BARRACKS,
 } from "./gameData.js";
 import SurfaceDefense from './surface_defense';
 import SkyBackground   from './components/SkyBackground.jsx';
@@ -170,6 +171,9 @@ export default function Speranza() {
   // False until the player presses BEGIN on the start screen. Loading a save
   // also counts as starting — you already have a colony at that point.
   const [runStarted, setRunStarted] = useState(false);
+  // Ticks since the last survivor turned up. Growth is the game's pressure --
+  // see the note on ARRIVAL_CHECK_EVERY in gameData.js.
+  const [ticksSinceArrival, setTicksSinceArrival] = useState(0);
 
   // UI scale. Applied to the module during the initialiser, before the first
   // render, so fs() is already correct when styles are computed -- doing it in a
@@ -279,6 +283,7 @@ export default function Speranza() {
   const traderTimerRef           = useRef(0);
   const tradersVisitedRef        = useRef(0);
   const artifactsRef             = useRef([]);
+  const ticksSinceArrivalRef     = useRef(0);
   const activeDilemmaRef         = useRef(null);
   const tickHistoryRef = useRef([]);
   const eventTraceRef = useRef([]);
@@ -297,8 +302,8 @@ export default function Speranza() {
   const totalColonists = colonists.length;
 
   const calcPopCap = (g) => {
-    let cap = 3;
-    g.forEach(row => row.forEach(cell => { if (cell.type === "barracks") cap += 2; }));
+    let cap = POP_CAP_BASE;
+    g.forEach(row => row.forEach(cell => { if (cell.type === "barracks") cap += POP_CAP_PER_BARRACKS; }));
     return cap;
   };
   const popCap = calcPopCap(grid);
@@ -361,6 +366,7 @@ export default function Speranza() {
   useEffect(() => { traderTimerRef.current      = traderTimer;      }, [traderTimer]);
   useEffect(() => { tradersVisitedRef.current   = tradersVisited;   }, [tradersVisited]);
   useEffect(() => { artifactsRef.current        = artifacts;        }, [artifacts]);
+  useEffect(() => { ticksSinceArrivalRef.current = ticksSinceArrival; }, [ticksSinceArrival]);
   useEffect(() => { heatSuppressedTicksRef.current = heatSuppressedTicks; }, [heatSuppressedTicks]);
   // Raid cooldown — starts at 48 (one in-game day) to block raids on fresh game
   const raidCooldownTicksRef = useRef(RAID_GRACE_TICKS);
@@ -1968,6 +1974,29 @@ ${art.text}`, "success", { key: `artifact-${art.id}` });
           setSurfaceConditionTimer(nextTimer);
         }
 
+        // Survivors arriving. Deterministic: if there is a bed and a day of food
+        // spare, someone reaches the hatch. The player controls the rate by
+        // choosing whether to build Barracks -- the Anno lever, build housing to
+        // grow -- so the pressure is always something they opted into.
+        {
+          const since = ticksSinceArrivalRef.current + 1;
+          const pop = colonistsRef.current.length;
+          const cap = calcPopCap(gridRef.current);
+          const foodDrain = pop * DRAIN_PER_COL.food;
+          if (shouldArrive({ ticksSinceArrival: since, population: pop, popCap: cap,
+                             food: resAfterProduction.food, foodDrainPerTick: foodDrain })) {
+            const newCol = makeColonist(nextTick);
+            setColonists(prev => [...prev, newCol]);
+            addLog(`\u{1F9CD} ${newCol.name} reached the hatch and was taken in.`);
+            addToast(`\u{1F9CD} SURVIVOR\n${newCol.name} joined the colony.\nThey need a post.`,
+                     "success", { key: `arrival-${nextTick}` });
+            playRecruit();
+            ticksSinceArrivalRef.current = 0; setTicksSinceArrival(0);
+          } else {
+            ticksSinceArrivalRef.current = since; setTicksSinceArrival(since);
+          }
+        }
+
         // Trader arrival — rolled in the tick body, never in an updater.
         // Requires a working Radio Tower: without comms nobody knows you are
         // here. That gives the Radio Tower a second job besides raid ID.
@@ -2615,6 +2644,7 @@ ${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelte
     setTraderTimer(0); traderTimerRef.current = 0;
     setTradersVisited(0); tradersVisitedRef.current = 0;
     setArtifacts([]); artifactsRef.current = [];
+    setTicksSinceArrival(0); ticksSinceArrivalRef.current = 0;
     setActiveDirectives([]); activeDirectivesRef.current = [];
     activeDilemmaRef.current = null;
     raidCooldownTicksRef.current = Math.round(RAID_GRACE_TICKS * nextDiffConfig.graceMult);
