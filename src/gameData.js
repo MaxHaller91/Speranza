@@ -395,6 +395,10 @@ export function resetNameIdx() { nameIdx = 0; }
 // ─── Colonist Factory ─────────────────────────────────────────────────────────
 export const COLONIST_BASE = () => ({
   xp: 0, level: 0, traits: [], dutyTicks: 0, ticksAlive: 0, pendingTraitPick: false,
+  // Which labour group this colonist belongs to, or null for unassigned.
+  // The allocator turns group membership into a specific post -- the player
+  // never picks cells. See LABOR_GROUPS / allocateLabor().
+  group: null,
   joinTick: 0, expeditionsCompleted: 0, raidsSurvived: 0,
   // Which room this colonist is posted to, or null. Grid worker counts are
   // DERIVED from this — see reconcileAssignments(). Never edit cell.workers directly.
@@ -1064,6 +1068,125 @@ export function postStatusFor(roomType) {
   return roomType === "sentryPost" ? "onSentry" : "working";
 }
 
+// ─── Labour groups ───────────────────────────────────────────────────────────
+// The player used to assign every colonist to a specific cell by clicking small
+// circles. A playtester lost a colony to it: "I wasn't able to click the tiny
+// circles quick enough between pop ups to move the colonists before they all
+// started starving."
+//
+// Instead you now allocate *headcount to a group*, and the allocator distributes
+// those people across that group's buildings in priority order. Build a second
+// Hydroponics and it staffs itself. Lose a worker to injury and the group
+// backfills on the next tick, so food production cannot silently stop.
+//
+// `rooms` is in priority order -- earlier rooms fill first. That is why FOOD
+// staffs Hydroponics before the Dining Hall: raw supply before refinement.
+//
+// This is deliberately separate from the adjacency `tag` field. Tags describe
+// what a room *is* (for adjacency bonuses); groups describe who *works* there.
+// Splitting food and water into their own groups, which tags do not do, lets a
+// player prioritise one over the other.
+export const LABOR_GROUPS = {
+  food:       { label: "FOOD",       icon: "🌱", rooms: ["hydro", "diningHall"] },
+  water:      { label: "WATER",      icon: "💧", rooms: ["water"] },
+  power:      { label: "POWER",      icon: "⚡", rooms: ["power", "geothermal"] },
+  industry:   { label: "INDUSTRY",   icon: "🔧", rooms: ["workshop", "researchLab", "armory"] },
+  care:       { label: "MEDICAL",    icon: "⚕", rooms: ["hospital"] },
+  defense:    { label: "DEFENSE",    icon: "🪖", rooms: ["sentryPost", "empArray"] },
+  recreation: { label: "RECREATION", icon: "🍺", rooms: ["tavern"] },
+};
+export const LABOR_GROUP_ORDER = [
+  "food", "water", "power", "industry", "care", "defense", "recreation",
+];
+
+/** Which group, if any, staffs this room type. */
+export function groupOfRoom(roomType) {
+  for (const key of LABOR_GROUP_ORDER) {
+    if (LABOR_GROUPS[key].rooms.includes(roomType)) return key;
+  }
+  return null;
+}
+
+/**
+ * Total staffable seats a group currently has on the grid. Used by the UI to
+ * stop the player pouring twenty people into a group with one building.
+ */
+export function groupCapacity(grid, groupKey) {
+  const g = LABOR_GROUPS[groupKey];
+  if (!g) return 0;
+  let seats = 0;
+  grid.forEach(row => row.forEach(cell => {
+    if (!cell?.type || !g.rooms.includes(cell.type)) return;
+    seats += ROOM_TYPES[cell.type]?.cap ?? 0;
+  }));
+  return seats;
+}
+
+/**
+ * Turn group membership into concrete posts.
+ *
+ * Pure: give it colonists and a grid, get back a colonists array. Returns the
+ * SAME array reference when nothing needs to change, so React bails out of the
+ * update rather than re-rendering every tick.
+ *
+ * Only colonists who are available to work are posted. Anyone injured,
+ * sheltered, on an expedition or excavating keeps whatever state they have --
+ * the allocator must not yank someone out of a hospital bed.
+ */
+export function allocateLabor(colonists, grid) {
+  // Seats, in priority order, per group.
+  const seatsByGroup = {};
+  for (const key of LABOR_GROUP_ORDER) {
+    const wanted = LABOR_GROUPS[key].rooms;
+    const seats = [];
+    // Priority is room order first, then grid order, so a second Hydroponics
+    // fills before the first Dining Hall.
+    wanted.forEach(roomType => {
+      grid.forEach((row, r) => row.forEach((cell, c) => {
+        if (cell?.type !== roomType) return;
+        const cap = ROOM_TYPES[roomType]?.cap ?? 0;
+        for (let i = 0; i < cap; i++) seats.push({ r, c, type: roomType });
+      }));
+    });
+    seatsByGroup[key] = seats;
+  }
+
+  const used = {};
+  let changed = false;
+  const next = colonists.map(col => {
+    const available = col.status === "idle" || isOnPost(col.status);
+    if (!available) return col;
+
+    const key = col.group;
+    if (!key || !LABOR_GROUPS[key]) {
+      // Ungrouped: stand down, but leave non-post statuses alone.
+      if (col.assignedRoom === null && col.status === "idle") return col;
+      changed = true;
+      return { ...col, assignedRoom: null, status: "idle" };
+    }
+
+    const i = used[key] ?? 0;
+    const seat = seatsByGroup[key][i];
+    if (!seat) {
+      // More people in this group than seats: they idle rather than vanish.
+      if (col.assignedRoom === null && col.status === "idle") return col;
+      changed = true;
+      return { ...col, assignedRoom: null, status: "idle" };
+    }
+    used[key] = i + 1;
+
+    const status = postStatusFor(seat.type);
+    const same = col.assignedRoom && col.assignedRoom.r === seat.r
+      && col.assignedRoom.c === seat.c && col.status === status;
+    if (same) return col;
+    changed = true;
+    return { ...col, assignedRoom: { r: seat.r, c: seat.c },
+             previousRoom: { r: seat.r, c: seat.c }, status };
+  });
+
+  return changed ? next : colonists;
+}
+
 /** Map of "r-c" → seats currently filled. Mutate as you hand out more. */
 export function occupiedSeats(colonists) {
   const seats = new Map();
@@ -1128,11 +1251,14 @@ export function makeGrid() {
 
 export function initColonists() {
   nameIdx = 0; // reset name counter for fresh colony
-  // The two starters are posted to the Workshop and Power Cell laid down by
-  // initGrid(); their assignedRoom is what makes those cells read as staffed.
+  // The two starters begin in the INDUSTRY and POWER groups, which the allocator
+  // turns into posts at the Workshop and Power Cell laid down by initGrid().
+  // Seeding the *group* rather than the post matters: without it a new colony
+  // opens with three idle people and nothing producing, because assignedRoom is
+  // now derived from group membership and would be stripped on the first pass.
   return [
-    { id: "c0", name: nextName(), status: "working", backstory: BACKSTORIES[0], quirk: QUIRKS[0], injuryCount: 0, ...COLONIST_BASE(), assignedRoom: { r: 0, c: 0 } },
-    { id: "c1", name: nextName(), status: "working", backstory: BACKSTORIES[1], quirk: QUIRKS[1], injuryCount: 0, ...COLONIST_BASE(), assignedRoom: { r: 0, c: 1 } },
+    { id: "c0", name: nextName(), status: "working", backstory: BACKSTORIES[0], quirk: QUIRKS[0], injuryCount: 0, ...COLONIST_BASE(), group: "industry", assignedRoom: { r: 0, c: 0 } },
+    { id: "c1", name: nextName(), status: "working", backstory: BACKSTORIES[1], quirk: QUIRKS[1], injuryCount: 0, ...COLONIST_BASE(), group: "power", assignedRoom: { r: 0, c: 1 } },
     { id: "c2", name: nextName(), status: "idle",    backstory: BACKSTORIES[2], quirk: QUIRKS[2], injuryCount: 0, ...COLONIST_BASE() },
   ];
 }

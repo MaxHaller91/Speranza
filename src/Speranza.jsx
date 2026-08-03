@@ -52,6 +52,7 @@ import {
   calcAdjacency, calcAdjacencyMorale,
   fs, setUiScale, UI_SCALES, DEFAULT_UI_SCALE, UI_SCALE_KEY,
   shouldArrive, ARRIVAL_CHECK_EVERY, POP_CAP_BASE, POP_CAP_PER_BARRACKS,
+  LABOR_GROUPS, LABOR_GROUP_ORDER, allocateLabor, groupCapacity,
 } from "./gameData.js";
 import SurfaceDefense from './surface_defense';
 import SkyBackground   from './components/SkyBackground.jsx';
@@ -61,6 +62,7 @@ import StartScreen     from './components/StartScreen.jsx';
 import TalentScreen    from './components/TalentScreen.jsx';
 import DirectivesScreen from './components/DirectivesScreen.jsx';
 import TraderModal     from './components/TraderModal.jsx';
+import WorkforcePanel  from './components/WorkforcePanel.jsx';
 import DilemmaModal    from './components/DilemmaModal.jsx';
 import TraitPicker     from './components/TraitPicker.jsx';
 import BuildMenu       from './components/BuildMenu.jsx';
@@ -386,7 +388,11 @@ export default function Speranza() {
   // Both helpers return their input reference when there is nothing to change,
   // so setState bails out and this converges in at most two passes.
   useEffect(() => {
-    setColonists(prev => pruneInvalidAssignments(prev, gridRef.current));
+    // Order matters: drop posts that no longer exist, hand out posts from group
+    // membership, then derive cell.workers from the result. Every step returns
+    // its input unchanged when there is nothing to do, so setState bails out
+    // and this settles in at most two passes instead of looping.
+    setColonists(prev => allocateLabor(pruneInvalidAssignments(prev, gridRef.current), gridRef.current));
     setGrid(prev => reconcileGridWorkers(prev, colonistsRef.current));
   }, [colonists, grid]);
 
@@ -2726,6 +2732,25 @@ ${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelte
     playSuccess();
   };
 
+  // Move one person into or out of a labour group. The player never picks a
+  // cell -- allocateLabor turns the headcount into posts on the next pass.
+  const changeGroupSize = (groupKey, delta) => {
+    if (!LABOR_GROUPS[groupKey]) return;
+    const canWork = (c) => c.status === "idle" || isOnPost(c.status);
+    if (delta > 0) {
+      const free = colonists.find(c => canWork(c) && c.group !== groupKey && !c.group)
+                ?? colonists.find(c => canWork(c) && c.group !== groupKey);
+      if (!free) { addLog("⚠ Nobody free to reassign"); return; }
+      setColonists(prev => prev.map(c => c.id === free.id ? { ...c, group: groupKey } : c));
+      playAssign();
+    } else {
+      const member = [...colonists].reverse().find(c => c.group === groupKey && canWork(c));
+      if (!member) return;
+      setColonists(prev => prev.map(c => c.id === member.id ? { ...c, group: null } : c));
+      playUnassign();
+    }
+  };
+
   const handleUnlockTalent = (key) => {
     const t = TALENTS[key];
     // Guard rather than trust the button's disabled state — the dev hook and a
@@ -3117,6 +3142,7 @@ ${RAID_SIZES[lostSize ?? "small"].duration} ticks of strikes incoming — shelte
           res={res}
           memorial={memorial}
           artifacts={artifacts}
+          workforce={<WorkforcePanel colonists={colonists} grid={grid} onChangeGroup={changeGroupSize} />}
           onCloseColonist={() => setSelectedColonist(null)}
           onAssign={handleAssign}
           onSetExpedDuration={setExpedDuration}

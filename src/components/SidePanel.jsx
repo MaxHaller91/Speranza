@@ -51,7 +51,7 @@ export default function SidePanel({
   selCell, buildMenu, selected,
   armoryArmed, expeditions, expedDuration, unassigned,
   expedLocationId, expedCrewIds,
-  unlockedTechs, res, memorial, artifacts = [],
+  unlockedTechs, res, memorial, artifacts = [], workforce = null,
   // callbacks
   onCloseColonist, onAssign, onSetExpedDuration, onLaunchExpedition,
   onSetExpedLocation, onToggleCrew,
@@ -448,6 +448,8 @@ export default function SidePanel({
           </div>
         </div>
       )}
+
+      {workforce}
 
       {/* Artifacts — things long-lived colonists made. The living counterpart
           to the memorial, and deliberately kept after their maker dies. */}
