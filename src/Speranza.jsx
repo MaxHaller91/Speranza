@@ -54,6 +54,7 @@ import {
   shouldArrive, ARRIVAL_CHECK_EVERY, POP_CAP_BASE, POP_CAP_PER_BARRACKS,
   LABOR_GROUPS, LABOR_GROUP_ORDER, allocateLabor, groupCapacity,
   ROOM_MAX_LEVEL, roomOutputMult, roomUpgradeCost, barracksCapacity,
+  advanceTravel, TRAVEL_TICKS_PER_CELL,
 } from "./gameData.js";
 import SurfaceDefense from './surface_defense';
 import SkyBackground   from './components/SkyBackground.jsx';
@@ -1059,6 +1060,10 @@ export default function Speranza() {
       if (gameOverRef.current) return;
       currentTickToastTagsRef.current = [];
 
+      // Move people toward their posts first, so anyone arriving this tick is
+      // counted by the production pass below rather than a tick late.
+      setColonists(prev => advanceTravel(prev));
+
       const g    = gridRef.current;
       const cols = colonistsRef.current;
       const totalCol = cols.length;
@@ -1176,25 +1181,31 @@ export default function Speranza() {
           // does — see calcAdjacency(). Columns used to be entirely inert.
           const adj = calcAdjacency(g, ri, ci, effectsRef.current.adjacencyMult);
 
+          // Consumption follows presence for the same reason production does:
+          // a room nobody has reached yet is idle, not running at a loss.
+          const manned = cell.present ?? cell.workers;
+
           let canRun = true;
           for (const [r, amt] of Object.entries(def.consumes)) {
             const need = r === "energy"
-              ? Math.max(0, amt + adj.energyDelta) * cell.workers
-              : amt * cell.workers;
+              ? Math.max(0, amt + adj.energyDelta) * manned
+              : amt * manned;
             if (next[r] < need) { canRun = false; break; }
           }
           if (!canRun) return;
 
           for (const [r, amt] of Object.entries(def.consumes)) {
             const used = r === "energy"
-              ? Math.max(0, amt + adj.energyDelta) * cell.workers
-              : amt * cell.workers;
+              ? Math.max(0, amt + adj.energyDelta) * manned
+              : amt * manned;
             next[r] = clamp(next[r] - used, 0, MAX_RES);
             flow[r] -= used;
             if (r === "energy" || r === "food" || r === "water") pushReason(r, -used, `${def.label} upkeep`);
           }
           for (const [r, amt] of Object.entries(def.produces)) {
-            const made = amt * cell.workers * adj.outputMult
+            // `present`, not `workers`: a room only produces while someone is
+            // actually standing in it. The difference is the cost of the walk.
+            const made = amt * manned * adj.outputMult
               * directiveFxRef.current.productionMult * roomOutputMult(cell.level);
             next[r] = clamp(next[r] + made, 0, MAX_RES);
             flow[r] += made;

@@ -10,6 +10,15 @@
 import { LABOR_GROUPS, LABOR_GROUP_ORDER, groupCapacity, fs } from "../gameData.js";
 
 export default function WorkforcePanel({ colonists, grid, onChangeGroup }) {
+  // How many of this group's people have actually reached their post. A room
+  // only produces while someone is standing in it, so "3 assigned" can mean
+  // zero output while they walk -- without this the game looks like it is
+  // lying to you.
+  const enRouteByGroup = {};
+  colonists.forEach(c => {
+    if (!c.group) return;
+    if (c.travelTicks > 0) enRouteByGroup[c.group] = (enRouteByGroup[c.group] ?? 0) + 1;
+  });
   const working = colonists.filter(c => c.status !== "onExpedition");
   const counts = {};
   for (const key of LABOR_GROUP_ORDER) counts[key] = 0;
@@ -57,6 +66,12 @@ export default function WorkforcePanel({ colonists, grid, onChangeGroup }) {
               fontSize: fs(10), fontFamily: "monospace", minWidth: fs(34), textAlign: "right",
             }} title={over ? "More people than seats — the extra are idle" : undefined}>
               {n}/{seats}
+            </span>
+            <span style={{
+              color: "#c88a30", fontSize: fs(8), minWidth: fs(24), textAlign: "right",
+              fontFamily: "monospace",
+            }} title={enRouteByGroup[key] ? `${enRouteByGroup[key]} walking — not producing yet` : undefined}>
+              {enRouteByGroup[key] ? `→${enRouteByGroup[key]}` : ""}
             </span>
             <button
               onClick={() => onChangeGroup(key, -1)}

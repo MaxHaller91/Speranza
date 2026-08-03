@@ -403,6 +403,13 @@ export const COLONIST_BASE = () => ({
   // Which room this colonist is posted to, or null. Grid worker counts are
   // DERIVED from this — see reconcileAssignments(). Never edit cell.workers directly.
   assignedRoom: null,
+  // Where they physically ARE, and how many ticks until they reach their post.
+  // Position is simulated in tick-space, deliberately: the sprite layer walks in
+  // real time at 60fps, so if production depended on the renderer's idea of
+  // where someone stood, a colony at 10x would behave differently from one at
+  // 1x. The renderer interpolates for looks; this is what production reads.
+  at: null,
+  travelTicks: 0,
   // Remembers the last post so shelter/injury recovery can send them back.
   previousRoom: null,
 });
@@ -1053,12 +1060,17 @@ export function pruneInvalidAssignments(colonists, grid) {
 /** Rewrite every cell's `workers` to match the colonist assignments. */
 export function reconcileGridWorkers(grid, colonists) {
   const counts = computeWorkerCounts(colonists);
+  const present = computePresence(colonists);
   let changed = false;
   const next = grid.map((row, r) => row.map((cell, c) => {
     const want = cell.type ? (counts.get(ROOM_KEY(r, c)) ?? 0) : 0;
-    if (cell.workers === want) return cell;
+    // `workers` is who is posted here; `present` is who has actually arrived.
+    // Production reads `present`, staffing UI reads `workers`, and the gap
+    // between them is the cost of the walk.
+    const here = cell.type ? (present.get(ROOM_KEY(r, c)) ?? 0) : 0;
+    if (cell.workers === want && cell.present === here) return cell;
     changed = true;
-    return { ...cell, workers: want };
+    return { ...cell, workers: want, present: here };
   }));
   return changed ? next : grid;
 }
@@ -1106,6 +1118,67 @@ export function roomUpgradeCost(roomType, level = 1) {
 /** Housing a single Barracks provides at this level. */
 export function barracksCapacity(level = 1) {
   return POP_CAP_PER_BARRACKS * Math.max(1, Math.min(ROOM_MAX_LEVEL, level));
+}
+
+// ─── Travel and presence ─────────────────────────────────────────────────────
+// A room produces only while someone is standing in it. That makes the floor
+// plan matter: a post far from where people keep being sent costs real output
+// every time they walk. It also means "2 workers assigned" and "2 workers
+// present" are different numbers, and the UI has to show both -- otherwise the
+// game looks like it is lying when a staffed room produces nothing.
+export const TRAVEL_TICKS_PER_CELL = 1;
+
+/** Manhattan distance in cells. Rows are floors, columns are rooms along them. */
+export function cellDistance(a, b) {
+  if (!a || !b) return 0;
+  return Math.abs(a.r - b.r) + Math.abs(a.c - b.c);
+}
+
+/**
+ * Advance everyone one tick toward their post.
+ *
+ * Pure, and returns the input reference when nothing moved so React bails out.
+ * A colonist with no post stays where they are rather than teleporting home.
+ */
+export function advanceTravel(colonists) {
+  let changed = false;
+  const next = colonists.map(col => {
+    const dest = col.assignedRoom;
+    if (!dest) return col;
+
+    // Already there.
+    if (col.at && col.at.r === dest.r && col.at.c === dest.c && col.travelTicks === 0) return col;
+
+    // Newly posted somewhere else: start walking. `at` null means they have
+    // never been placed, so put them straight in rather than walking from
+    // nowhere -- that only happens on a fresh colony or a loaded save.
+    if (!col.at) { changed = true; return { ...col, at: { ...dest }, travelTicks: 0 }; }
+
+    const remaining = (col.travelTicks > 0)
+      ? col.travelTicks - 1
+      : cellDistance(col.at, dest) * TRAVEL_TICKS_PER_CELL - 1;
+
+    changed = true;
+    if (remaining <= 0) return { ...col, at: { ...dest }, travelTicks: 0 };
+    return { ...col, travelTicks: remaining };
+  });
+  return changed ? next : colonists;
+}
+
+/** Map of "r-c" → colonists actually standing there and able to work. */
+export function computePresence(colonists) {
+  const counts = new Map();
+  colonists.forEach(col => {
+    if (!col.at || col.travelTicks > 0) return;
+    if (!isOnPost(col.status)) return;
+    // Only count them where they are posted; someone standing in a room they
+    // are not assigned to is passing through, not working.
+    const d = col.assignedRoom;
+    if (!d || d.r !== col.at.r || d.c !== col.at.c) return;
+    const key = ROOM_KEY(col.at.r, col.at.c);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  });
+  return counts;
 }
 
 // ─── Labour groups ───────────────────────────────────────────────────────────
